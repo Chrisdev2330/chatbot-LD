@@ -3,7 +3,7 @@ from google import genai
 from heyoo import WhatsApp
 import os
 import ssl
-import certifi
+#import certifi
 import requests
 
 #os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
@@ -166,4 +166,4 @@ def enviar(telefonoRecibe, respuesta):
     mensajeWa.send_message(respuesta, telefonoRecibe)
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', debug=True)
+    app.run(host='0.0.0.0',debug=True)
