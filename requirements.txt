@@ -1,0 +1,9 @@
+flask
+google-generativeai
+heyoo
+requests
+#certifi
+google-genai
+gunicorn
+python-dotenv
+jsonify
