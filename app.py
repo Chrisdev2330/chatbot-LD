@@ -1,3 +1,4 @@
+from flask import Flask, jsonify
 from flask import Flask, jsonify, request
 from google import genai
 from heyoo import WhatsApp
@@ -5,12 +6,11 @@ import os
 import ssl
 import requests
 from woocommerce import API
+import threading
+import time
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
-
-# ==============================================
-# CONFIGURACIÓN INICIAL
-# ==============================================
 
 # Configuración de Gemini
 cliente = genai.Client(api_key="AIzaSyAKJHDBN8cXHtFKc0rzX9oGMsOTXvK1BgI")
@@ -22,19 +22,13 @@ WHATSAPP_NUMBER_ID = '730238483499494'
 # Configuración de WooCommerce
 wcapi = API(
     url="https://c2840384.ferozo.com/",
-    consumer_key="ck_ce17ce5bf4c982b01b3a1aaffec210878e0cb8dc",
-    consumer_secret="cs_9b51876fdd8daeb3d179f1d6d545840e2a9f2c32",
+    consumer_key="ck_1a9cb36729c8d926561c179636f8ba5207e98385",
+    consumer_secret="cs_ccd47382c2db884e0989391e156c6b8146bd65ba",
     version="wc/v3"
 )
 
-# Números de teléfono para notificaciones
-NUMERO_ADMIN = "+584241220797"  # Número estático venezolano para notificaciones a dueños
-SECRETO_CREACION = "LDcrea123"
-SECRETO_ACTUALIZA = "LDactua123"
-
-# ==============================================
-# BASE DE CONOCIMIENTO
-# ==============================================
+# Número de administrador estático
+ADMIN_PHONE = "+584241220797"
 
 preguntas_frecuentes = {
     "formas de pago minorista": {
@@ -94,10 +88,6 @@ Nuestros clientes nos destacan por:
     }
 }
 
-# ==============================================
-# PLANTILLAS DE MENSAJES
-# ==============================================
-
 PLANTILLA_BIENVENIDA = """¡Hola! 💄 Soy tu asistente virtual de *LD Make Up*.
 
 Estoy aquí para ayudarte con:
@@ -144,61 +134,51 @@ Por favor, contacta a nuestro equipo de atención al cliente:
 
 ¡Estaremos encantados de ayudarte!"""
 
-PLANTILLA_NUEVO_PEDIDO_CLIENTE = """📦 *¡Gracias por tu pedido en LD Make Up!*
+PLANTILLA_NUEVO_PEDIDO = """📦 *Nuevo Pedido Creado* 🎉
 
-Hemos recibido tu pedido con éxito:
-🆔 ID de Pedido: {order_id}
-📅 Fecha: {date_created}
+¡Hola {nombre_cliente}! 
+Tu pedido *#{order_id}* ha sido creado exitosamente.
+
+📅 Fecha: {fecha}
+🛒 Productos:
+{productos}
 💰 Total: {total}
 
-Puedes ver los detalles de tu pedido aquí:
-{order_url}
+Estaremos procesando tu pedido pronto. ¡Gracias por tu compra!"""
 
-*Estado actual:* 🟡 Procesando
+PLANTILLA_CAMBIO_ESTADO = """🔄 *Actualización de Pedido* 
 
-Te notificaremos cuando tu pedido cambie de estado. ¡Gracias por confiar en nosotros! 💖"""
+¡Hola {nombre_cliente}! 
+El estado de tu pedido *#{order_id}* ha cambiado a: *{estado}*
 
-PLANTILLA_NUEVO_PEDIDO_ADMIN = """🚨 *NUEVO PEDIDO RECIBIDO* 🚀
+📦 Detalles:
+{productos}
+🔄 Nuevo estado: {estado_descripcion}
 
-📋 Detalles del pedido:
-🆔 ID: {order_id}
-👤 Cliente: {customer_name}
-📞 Teléfono: {billing_phone}
-📧 Email: {billing_email}
-📍 Dirección: {billing_address}
+Cualquier duda, estamos para ayudarte."""
+
+PLANTILLA_ADMIN_NUEVO_PEDIDO = """👔 *NUEVO PEDIDO - ADMIN* 
+
+El cliente {nombre_cliente} ({telefono}) ha creado un nuevo pedido.
+
+📋 *Detalles del Pedido*:
+🆔 ID: #{order_id}
+📅 Fecha: {fecha}
+🛒 Productos:
+{productos}
 💰 Total: {total}
 
-📦 Productos:
-{line_items}
+Por favor, revisa el pedido en el panel de administración."""
 
-Acción requerida: Por favor prepara el pedido y actualiza su estado en el sistema."""
+PLANTILLA_ADMIN_CAMBIO_ESTADO = """👔 *ACTUALIZACIÓN DE PEDIDO - ADMIN* 
 
-PLANTILLA_ACTUALIZACION_ESTADO_CLIENTE = """📢 *Actualización de tu pedido* #{order_id}
+El pedido *#{order_id}* del cliente {nombre_cliente} ({telefono}) ha cambiado de estado.
 
-El estado de tu pedido ha cambiado:
-🔄 De: {status_from}
-➡️ A: {status_to}
+🔄 *Nuevo estado*: {estado}
+📦 *Productos*:
+{productos}
 
-{additional_message}
-
-Puedes ver los detalles de tu pedido aquí:
-{order_url}"""
-
-PLANTILLA_ACTUALIZACION_ESTADO_ADMIN = """🔧 *Estado de pedido actualizado*
-
-Has modificado el estado del pedido #{order_id}:
-🔄 De: {status_from}
-➡️ A: {status_to}
-
-👤 Cliente: {customer_name}
-📞 Teléfono: {billing_phone}
-
-📦 Productos:
-{line_items}"""
-
-# ==============================================
-# FLUJOS CONVERSACIONALES
-# ==============================================
+Por favor, verifica los detalles en el panel de administración."""
 
 FLUJO_CONVERSACION = {
     "agradecimiento": ["gracias", "muchas gracias", "thanks", "thank you", "agradecido", "agradecida"],
@@ -207,9 +187,130 @@ FLUJO_CONVERSACION = {
     "contacto_humano": ["humano", "persona", "asesor", "representante", "operador", "hablar con alguien"]
 }
 
-# ==============================================
-# MANEJO DE ESTADOS Y CONTEXTO
-# ==============================================
+ultima_revision_pedidos = None
+pedidos_conocidos = set()
+estados_pedidos = {}
+
+def obtener_pedidos_recientes():
+    ahora = datetime.now()
+    hace_24_horas = ahora - timedelta(hours=24)
+    fecha_desde = hace_24_horas.strftime('%Y-%m-%dT%H:%M:%S')
+    
+    try:
+        pedidos = wcapi.get("orders", params={"after": fecha_desde}).json()
+        return pedidos
+    except Exception as e:
+        print(f"Error al obtener pedidos: {e}")
+        return []
+
+def formatear_productos(line_items):
+    productos = []
+    for item in line_items:
+        productos.append(f"• {item['name']} x{item['quantity']} - {float(item['total']):.2f}")
+    return "\n".join(productos)
+
+def obtener_descripcion_estado(status):
+    estados = {
+        'pending': 'Pendiente de pago',
+        'processing': 'En proceso',
+        'on-hold': 'En espera',
+        'completed': 'Completado',
+        'cancelled': 'Cancelado',
+        'refunded': 'Reembolsado',
+        'failed': 'Fallido'
+    }
+    return estados.get(status, status)
+
+def enviar_notificacion_pedido(pedido, es_nuevo=True):
+    try:
+        mensajeWa = WhatsApp(WHATSAPP_TOKEN, WHATSAPP_NUMBER_ID)
+        telefono_cliente = pedido['billing']['phone']
+        
+        telefono_cliente = telefono_cliente.replace(" ", "").replace("-", "").replace("+", "")
+        if not telefono_cliente.startswith("58"):
+            telefono_cliente = "58" + telefono_cliente.lstrip("0")
+        telefono_cliente = f"+{telefono_cliente}"
+        
+        if telefono_cliente != "+584241220797":
+            return
+            
+        nombre_cliente = f"{pedido['billing']['first_name']} {pedido['billing']['last_name']}"
+        productos = formatear_productos(pedido['line_items'])
+        total = float(pedido['total'])
+        fecha = datetime.strptime(pedido['date_created'], '%Y-%m-%dT%H:%M:%S').strftime('%d/%m/%Y %H:%M')
+        
+        if es_nuevo:
+            mensaje_cliente = PLANTILLA_NUEVO_PEDIDO.format(
+                nombre_cliente=nombre_cliente,
+                order_id=pedido['id'],
+                fecha=fecha,
+                productos=productos,
+                total=f"{total:.2f}"
+            )
+            mensajeWa.send_message(mensaje_cliente, telefono_cliente)
+            
+            time.sleep(3)
+            mensaje_admin = PLANTILLA_ADMIN_NUEVO_PEDIDO.format(
+                nombre_cliente=nombre_cliente,
+                telefono=telefono_cliente,
+                order_id=pedido['id'],
+                fecha=fecha,
+                productos=productos,
+                total=f"{total:.2f}"
+            )
+            mensajeWa.send_message(mensaje_admin, ADMIN_PHONE)
+        else:
+            estado_desc = obtener_descripcion_estado(pedido['status'])
+            mensaje_cliente = PLANTILLA_CAMBIO_ESTADO.format(
+                nombre_cliente=nombre_cliente,
+                order_id=pedido['id'],
+                estado=pedido['status'],
+                estado_descripcion=estado_desc,
+                productos=productos
+            )
+            mensajeWa.send_message(mensaje_cliente, telefono_cliente)
+            
+            time.sleep(3)
+            mensaje_admin = PLANTILLA_ADMIN_CAMBIO_ESTADO.format(
+                nombre_cliente=nombre_cliente,
+                telefono=telefono_cliente,
+                order_id=pedido['id'],
+                estado=estado_desc,
+                productos=productos
+            )
+            mensajeWa.send_message(mensaje_admin, ADMIN_PHONE)
+            
+    except Exception as e:
+        print(f"Error al enviar notificación: {e}")
+
+def verificar_pedidos():
+    global ultima_revision_pedidos, pedidos_conocidos, estados_pedidos
+    
+    while True:
+        try:
+            pedidos = obtener_pedidos_recientes()
+            
+            for pedido in pedidos:
+                if pedido['id'] not in pedidos_conocidos:
+                    pedidos_conocidos.add(pedido['id'])
+                    estados_pedidos[pedido['id']] = pedido['status']
+                    enviar_notificacion_pedido(pedido, es_nuevo=True)
+            
+            for pedido in pedidos:
+                if pedido['id'] in estados_pedidos and estados_pedidos[pedido['id']] != pedido['status']:
+                    estados_pedidos[pedido['id']] = pedido['status']
+                    enviar_notificacion_pedido(pedido, es_nuevo=False)
+            
+            ultima_revision_pedidos = datetime.now()
+            
+        except Exception as e:
+            print(f"Error en verificación de pedidos: {e}")
+        
+        time.sleep(5)
+
+hilo_pedidos = threading.Thread(target=verificar_pedidos)
+hilo_pedidos.daemon = True
+hilo_pedidos.start()
 
 estados_chats = {}
 
@@ -220,10 +321,6 @@ def actualizar_estado(telefono, clave, valor):
 
 def obtener_estado(telefono, clave, default=None):
     return estados_chats.get(telefono, {}).get(clave, default)
-
-# ==============================================
-# FUNCIONES DE BÚSQUEDA INTELIGENTE
-# ==============================================
 
 def buscar_en_preguntas_frecuentes(mensaje):
     mensaje = mensaje.lower()
@@ -241,16 +338,13 @@ def buscar_en_preguntas_frecuentes(mensaje):
     
     if len(coincidencias) == 1:
         return True, coincidencias[0]["respuesta"]
+    
     elif len(coincidencias) > 1:
         opciones = "\n".join([f"• {faq['pregunta']}" for faq in coincidencias])
         mensaje = f"🔍 Tengo varias opciones relacionadas con tu consulta:\n\n{opciones}\n\nPor favor, especifica cuál de estas preguntas es la que necesitas responder."
         return True, mensaje
     
     return False, None
-
-# ==============================================
-# FUNCIONES DE RESPUESTA
-# ==============================================
 
 def enviar(telefono, mensaje):
     mensajeWa = WhatsApp(WHATSAPP_TOKEN, WHATSAPP_NUMBER_ID)
@@ -296,84 +390,6 @@ def manejar_respuesta_gemini(telefono, mensaje):
     except Exception as e:
         enviar(telefono, "⚠️ Hubo un error procesando tu solicitud. Por favor inténtalo nuevamente o contáctanos al +54 9 3813 02-1066")
 
-# ==============================================
-# FUNCIONES WOOCOMMERCE
-# ==============================================
-
-def obtener_direccion_completa(order_data):
-    billing = order_data['billing']
-    return f"{billing['address_1']}, {billing.get('address_2', '')}, {billing['city']}, {billing['state']}, {billing['country']}"
-
-def formatear_productos(order_data):
-    items = []
-    for item in order_data['line_items']:
-        items.append(f"• {item['name']} x{item['quantity']} - ${item['total']}")
-    return "\n".join(items)
-
-def enviar_notificacion_cliente(phone, order_data):
-    try:
-        mensaje = PLANTILLA_NUEVO_PEDIDO_CLIENTE.format(
-            order_id=order_data['id'],
-            date_created=order_data['date_created'].split('T')[0],
-            total=order_data['total'],
-            order_url=order_data['_links']['self'][0]['href']
-        )
-        enviar(phone, mensaje)
-    except Exception as e:
-        print(f"Error enviando notificación a cliente: {e}")
-
-def enviar_notificacion_admin(order_data):
-    try:
-        mensaje = PLANTILLA_NUEVO_PEDIDO_ADMIN.format(
-            order_id=order_data['id'],
-            customer_name=f"{order_data['billing']['first_name']} {order_data['billing']['last_name']}",
-            billing_phone=order_data['billing']['phone'],
-            billing_email=order_data['billing']['email'],
-            billing_address=obtener_direccion_completa(order_data),
-            total=order_data['total'],
-            line_items=formatear_productos(order_data)
-        )
-        enviar(NUMERO_ADMIN, mensaje)
-    except Exception as e:
-        print(f"Error enviando notificación a admin: {e}")
-
-def enviar_actualizacion_cliente(phone, order_data, status_from, status_to):
-    try:
-        additional_msg = ""
-        if status_to == "completed":
-            additional_msg = "🎉 ¡Tu pedido ha sido completado y enviado! Gracias por tu compra."
-        elif status_to == "cancelled":
-            additional_msg = "❌ Lamentamos informarte que tu pedido ha sido cancelado. Para más información, contáctanos."
-        
-        mensaje = PLANTILLA_ACTUALIZACION_ESTADO_CLIENTE.format(
-            order_id=order_data['id'],
-            status_from=status_from,
-            status_to=status_to,
-            additional_message=additional_msg,
-            order_url=order_data['_links']['self'][0]['href']
-        )
-        enviar(phone, mensaje)
-    except Exception as e:
-        print(f"Error enviando actualización a cliente: {e}")
-
-def enviar_actualizacion_admin(order_data, status_from, status_to):
-    try:
-        mensaje = PLANTILLA_ACTUALIZACION_ESTADO_ADMIN.format(
-            order_id=order_data['id'],
-            status_from=status_from,
-            status_to=status_to,
-            customer_name=f"{order_data['billing']['first_name']} {order_data['billing']['last_name']}",
-            billing_phone=order_data['billing']['phone'],
-            line_items=formatear_productos(order_data)
-        )
-        enviar(NUMERO_ADMIN, mensaje)
-    except Exception as e:
-        print(f"Error enviando actualización a admin: {e}")
-
-# ==============================================
-# ENDPOINT PRINCIPAL (INTEGRADO)
-# ==============================================
-
 @app.route("/webhook/", methods=["POST", "GET"])
 def webhook_whatsapp():
     if request.method == "GET":
@@ -381,79 +397,33 @@ def webhook_whatsapp():
             return request.args.get('hub.challenge')
         return "Error de autentificación."
 
-    # Verificar si es un webhook de WooCommerce
-    if request.headers.get('Content-Type') == 'application/json':
-        try:
-            data = request.get_json()
-            
-            # Webhook de creación de pedido
-            if request.headers.get('X-WC-Webhook-Signature') == SECRETO_CREACION:
-                order_data = data
-                billing_phone = order_data.get('billing', {}).get('phone')
-                if billing_phone:
-                    # Asegurarse de que el número tenga el formato correcto
-                    if not billing_phone.startswith('+'):
-                        billing_phone = f"+58{billing_phone}"  # Asumiendo números venezolanos
-                    enviar_notificacion_cliente(billing_phone, order_data)
-                    enviar_notificacion_admin(order_data)
-                return jsonify({"status": "success"}), 200
-            
-            # Webhook de actualización de pedido
-            elif request.headers.get('X-WC-Webhook-Signature') == SECRETO_ACTUALIZA:
-                order_data = data
-                billing_phone = order_data.get('billing', {}).get('phone')
-                status_to = order_data.get('status')
-                status_from = order_data.get('previous_data', {}).get('status')
-                
-                if billing_phone and status_to and status_from and status_from != status_to:
-                    # Asegurarse de que el número tenga el formato correcto
-                    if not billing_phone.startswith('+'):
-                        billing_phone = f"+58{billing_phone}"  # Asumiendo números venezolanos
-                    enviar_actualizacion_cliente(billing_phone, order_data, status_from, status_to)
-                    enviar_actualizacion_admin(order_data, status_from, status_to)
-                return jsonify({"status": "success"}), 200
-            
-            return jsonify({"status": "error", "message": "Invalid secret"}), 403
-        except Exception as e:
-            print(f"Error procesando webhook WooCommerce: {e}")
-            return jsonify({"status": "error", "message": str(e)}), 500
+    data = request.get_json()
     
-    # Manejar webhook de WhatsApp
     try:
-        data = request.get_json()
-        if 'object' not in data or data['object'] != 'whatsapp_business_account':
-            return jsonify({"status": "error"}, 400)
-            
         if 'messages' not in data['entry'][0]['changes'][0]['value']:
             return jsonify({"status": "success"}, 200)
-    except Exception as e:
-        print(f"Error procesando webhook WhatsApp: {e}")
+    except:
         return jsonify({"status": "error"}, 400)
 
     telefonoCliente = data['entry'][0]['changes'][0]['value']['messages'][0]['from']
     mensaje = data['entry'][0]['changes'][0]['value']['messages'][0]['text']['body'].lower()
 
-    # Saludos iniciales
     if any(palabra in mensaje for palabra in ["hola", "hi", "hello", "buenos días", "buenas tardes", "buenas"]):
         enviar(telefonoCliente, PLANTILLA_BIENVENIDA)
         return jsonify({"status": "success"}, 200)
     
-    # Agradecimientos
     if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["agradecimiento"]):
         enviar(telefonoCliente, "¡Con gusto! ¿En qué más puedo ayudarte? 😊")
         return jsonify({"status": "success"}, 200)
     
-    # Despedidas
     if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["despedida"]):
         enviar(telefonoCliente, PLANTILLA_DESPEDIDA)
         return jsonify({"status": "success"}, 200)
     
-    # Notificaciones
     if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["notificaciones"]):
         enviar(telefonoCliente, MENSAJE_NOTIFICACIONES)
         return jsonify({"status": "success"}, 200)
     
-    # Solicitud de contacto humano
     if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["contacto_humano"]):
         intentos = obtener_estado(telefonoCliente, "intentos_fuera_contexto", 0)
         if intentos >= 2:
@@ -463,7 +433,6 @@ def webhook_whatsapp():
             enviar(telefonoCliente, "Por favor, indícame exactamente en qué necesitas ayuda para poder asistirte mejor. Si no logro resolver tu consulta, te proporcionaré nuestro contacto.")
         return jsonify({"status": "success"}, 200)
 
-    # Búsqueda en preguntas frecuentes
     encontrado, respuesta_faq = buscar_en_preguntas_frecuentes(mensaje)
     
     if encontrado:
@@ -472,18 +441,6 @@ def webhook_whatsapp():
         manejar_respuesta_gemini(telefonoCliente, mensaje)
 
     return jsonify({"status": "success"}, 200)
-
-# ==============================================
-# ENDPOINT DE PRUEBA
-# ==============================================
-
-@app.route("/")
-def index():
-    return "Bot de WhatsApp LD Make Up está en línea"
-
-# ==============================================
-# INICIO DE LA APLICACIÓN
-# ==============================================
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', debug=False)
