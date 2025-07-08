@@ -381,88 +381,91 @@ def webhook_whatsapp():
             return request.args.get('hub.challenge')
         return "Error de autentificación."
 
-    data = request.get_json()
-    
     # Verificar si es un webhook de WooCommerce
-    if 'entry' not in data:
-        # Manejar webhook de WooCommerce
+    if request.headers.get('Content-Type') == 'application/json':
         try:
-            if 'X-WC-Webhook-Source' in request.headers:
-                # Webhook de creación de pedido
-                if request.headers.get('X-WC-Webhook-Signature') == SECRETO_CREACION:
-                    order_data = data
-                    billing_phone = order_data.get('billing', {}).get('phone')
-                    if billing_phone:
-                        enviar_notificacion_cliente(billing_phone, order_data)
-                        enviar_notificacion_admin(order_data)
-                    return jsonify({"status": "success"}), 200
+            data = request.get_json()
+            
+            # Webhook de creación de pedido
+            if request.headers.get('X-WC-Webhook-Signature') == SECRETO_CREACION:
+                order_data = data
+                billing_phone = order_data.get('billing', {}).get('phone')
+                if billing_phone:
+                    enviar_notificacion_cliente(billing_phone, order_data)
+                    enviar_notificacion_admin(order_data)
+                return jsonify({"status": "success"}), 200
+            
+            # Webhook de actualización de pedido
+            elif request.headers.get('X-WC-Webhook-Signature') == SECRETO_ACTUALIZA:
+                order_data = data
+                billing_phone = order_data.get('billing', {}).get('phone')
+                status_to = order_data.get('status')
+                status_from = order_data.get('previous_data', {}).get('status')
                 
-                # Webhook de actualización de pedido
-                elif request.headers.get('X-WC-Webhook-Signature') == SECRETO_ACTUALIZA:
-                    order_data = data
-                    billing_phone = order_data.get('billing', {}).get('phone')
-                    status_to = order_data.get('status')
-                    status_from = order_data.get('previous_data', {}).get('status')
-                    
-                    if billing_phone and status_to and status_from and status_from != status_to:
-                        enviar_actualizacion_cliente(billing_phone, order_data, status_from, status_to)
-                        enviar_actualizacion_admin(order_data, status_from, status_to)
-                    return jsonify({"status": "success"}), 200
-                
-                return jsonify({"status": "error", "message": "Invalid secret"}), 403
+                if billing_phone and status_to and status_from and status_from != status_to:
+                    enviar_actualizacion_cliente(billing_phone, order_data, status_from, status_to)
+                    enviar_actualizacion_admin(order_data, status_from, status_to)
+                return jsonify({"status": "success"}), 200
+            
+            return jsonify({"status": "error", "message": "Invalid secret"}), 403
         except Exception as e:
             print(f"Error procesando webhook WooCommerce: {e}")
             return jsonify({"status": "error", "message": str(e)}), 500
     
-    # Manejar webhook de WhatsApp (código original)
+    # Manejar webhook de WhatsApp
     try:
-        if 'messages' not in data['entry'][0]['changes'][0]['value']:
+        data = request.get_json()
+        
+        # Verificar si es un mensaje de WhatsApp válido
+        if 'entry' not in data or 'messages' not in data['entry'][0]['changes'][0]['value']:
             return jsonify({"status": "success"}, 200)
-    except:
-        return jsonify({"status": "error"}, 400)
 
-    telefonoCliente = data['entry'][0]['changes'][0]['value']['messages'][0]['from']
-    mensaje = data['entry'][0]['changes'][0]['value']['messages'][0]['text']['body'].lower()
+        telefonoCliente = data['entry'][0]['changes'][0]['value']['messages'][0]['from']
+        mensaje = data['entry'][0]['changes'][0]['value']['messages'][0]['text']['body'].lower()
 
-    # Saludos iniciales
-    if any(palabra in mensaje for palabra in ["hola", "hi", "hello", "buenos días", "buenas tardes", "buenas"]):
-        enviar(telefonoCliente, PLANTILLA_BIENVENIDA)
-        return jsonify({"status": "success"}, 200)
-    
-    # Agradecimientos
-    if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["agradecimiento"]):
-        enviar(telefonoCliente, "¡Con gusto! ¿En qué más puedo ayudarte? 😊")
-        return jsonify({"status": "success"}, 200)
-    
-    # Despedidas
-    if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["despedida"]):
-        enviar(telefonoCliente, PLANTILLA_DESPEDIDA)
-        return jsonify({"status": "success"}, 200)
-    
-    # Notificaciones
-    if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["notificaciones"]):
-        enviar(telefonoCliente, MENSAJE_NOTIFICACIONES)
-        return jsonify({"status": "success"}, 200)
-    
-    # Solicitud de contacto humano
-    if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["contacto_humano"]):
-        intentos = obtener_estado(telefonoCliente, "intentos_fuera_contexto", 0)
-        if intentos >= 2:
-            enviar(telefonoCliente, MENSAJE_CONTACTO_HUMANO)
-            actualizar_estado(telefonoCliente, "intentos_fuera_contexto", 0)
+        # Saludos iniciales
+        if any(palabra in mensaje for palabra in ["hola", "hi", "hello", "buenos días", "buenas tardes", "buenas"]):
+            enviar(telefonoCliente, PLANTILLA_BIENVENIDA)
+            return jsonify({"status": "success"}, 200)
+        
+        # Agradecimientos
+        if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["agradecimiento"]):
+            enviar(telefonoCliente, "¡Con gusto! ¿En qué más puedo ayudarte? 😊")
+            return jsonify({"status": "success"}, 200)
+        
+        # Despedidas
+        if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["despedida"]):
+            enviar(telefonoCliente, PLANTILLA_DESPEDIDA)
+            return jsonify({"status": "success"}, 200)
+        
+        # Notificaciones
+        if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["notificaciones"]):
+            enviar(telefonoCliente, MENSAJE_NOTIFICACIONES)
+            return jsonify({"status": "success"}, 200)
+        
+        # Solicitud de contacto humano
+        if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["contacto_humano"]):
+            intentos = obtener_estado(telefonoCliente, "intentos_fuera_contexto", 0)
+            if intentos >= 2:
+                enviar(telefonoCliente, MENSAJE_CONTACTO_HUMANO)
+                actualizar_estado(telefonoCliente, "intentos_fuera_contexto", 0)
+            else:
+                enviar(telefonoCliente, "Por favor, indícame exactamente en qué necesitas ayuda para poder asistirte mejor. Si no logro resolver tu consulta, te proporcionaré nuestro contacto.")
+            return jsonify({"status": "success"}, 200)
+
+        # Búsqueda en preguntas frecuentes
+        encontrado, respuesta_faq = buscar_en_preguntas_frecuentes(mensaje)
+        
+        if encontrado:
+            enviar(telefonoCliente, respuesta_faq)
         else:
-            enviar(telefonoCliente, "Por favor, indícame exactamente en qué necesitas ayuda para poder asistirte mejor. Si no logro resolver tu consulta, te proporcionaré nuestro contacto.")
+            manejar_respuesta_gemini(telefonoCliente, mensaje)
+
         return jsonify({"status": "success"}, 200)
 
-    # Búsqueda en preguntas frecuentes
-    encontrado, respuesta_faq = buscar_en_preguntas_frecuentes(mensaje)
-    
-    if encontrado:
-        enviar(telefonoCliente, respuesta_faq)
-    else:
-        manejar_respuesta_gemini(telefonoCliente, mensaje)
-
-    return jsonify({"status": "success"}, 200)
+    except Exception as e:
+        print(f"Error procesando mensaje de WhatsApp: {e}")
+        return jsonify({"status": "error"}, 400)
 
 # ==============================================
 # INICIO DE LA APLICACIÓN
