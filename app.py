@@ -381,122 +381,109 @@ def webhook_whatsapp():
             return request.args.get('hub.challenge')
         return "Error de autentificación."
 
-    # Verificar el Content-Type para manejar correctamente los webhooks
-    if request.headers.get('Content-Type') == 'application/json':
-        data = request.get_json()
-    else:
-        # Si no es JSON, intentar procesar como form-data de WhatsApp
-        try:
-            data = request.get_json(force=True)
-        except:
-            return jsonify({"status": "error", "message": "Invalid Content-Type"}), 415
-    
     # Verificar si es un webhook de WooCommerce
-    if 'entry' not in data:
+    if request.headers.get('Content-Type') == 'application/json':
         try:
-            # Verificar el webhook de WooCommerce
-            if request.headers.get('X-WC-Webhook-Source'):
-                # Webhook de creación de pedido
-                if request.headers.get('X-WC-Webhook-Signature') == SECRETO_CREACION:
-                    order_data = data
-                    billing_phone = order_data.get('billing', {}).get('phone')
-                    if billing_phone:
-                        # Asegurar que el número tenga el formato correcto
-                        if not billing_phone.startswith('+'):
-                            if billing_phone.startswith('0'):
-                                billing_phone = '+54' + billing_phone[1:]
-                            else:
-                                billing_phone = '+' + billing_phone
-                        
-                        enviar_notificacion_cliente(billing_phone, order_data)
-                        enviar_notificacion_admin(order_data)
-                    return jsonify({"status": "success"}), 200
+            data = request.get_json()
+            
+            # Webhook de creación de pedido
+            if request.headers.get('X-WC-Webhook-Signature') == SECRETO_CREACION:
+                order_data = data
+                billing_phone = order_data.get('billing', {}).get('phone')
+                if billing_phone:
+                    # Asegurarse de que el número tenga el formato correcto
+                    if not billing_phone.startswith('+'):
+                        billing_phone = f"+58{billing_phone}"  # Asumiendo números venezolanos
+                    enviar_notificacion_cliente(billing_phone, order_data)
+                    enviar_notificacion_admin(order_data)
+                return jsonify({"status": "success"}), 200
+            
+            # Webhook de actualización de pedido
+            elif request.headers.get('X-WC-Webhook-Signature') == SECRETO_ACTUALIZA:
+                order_data = data
+                billing_phone = order_data.get('billing', {}).get('phone')
+                status_to = order_data.get('status')
+                status_from = order_data.get('previous_data', {}).get('status')
                 
-                # Webhook de actualización de pedido
-                elif request.headers.get('X-WC-Webhook-Signature') == SECRETO_ACTUALIZA:
-                    order_data = data
-                    billing_phone = order_data.get('billing', {}).get('phone')
-                    status_to = order_data.get('status')
-                    status_from = order_data.get('previous_data', {}).get('status')
-                    
-                    if billing_phone and status_to and status_from and status_from != status_to:
-                        # Asegurar que el número tenga el formato correcto
-                        if not billing_phone.startswith('+'):
-                            if billing_phone.startswith('0'):
-                                billing_phone = '+54' + billing_phone[1:]
-                            else:
-                                billing_phone = '+' + billing_phone
-                        
-                        enviar_actualizacion_cliente(billing_phone, order_data, status_from, status_to)
-                        enviar_actualizacion_admin(order_data, status_from, status_to)
-                    return jsonify({"status": "success"}), 200
-                
-                return jsonify({"status": "error", "message": "Invalid secret"}), 403
+                if billing_phone and status_to and status_from and status_from != status_to:
+                    # Asegurarse de que el número tenga el formato correcto
+                    if not billing_phone.startswith('+'):
+                        billing_phone = f"+58{billing_phone}"  # Asumiendo números venezolanos
+                    enviar_actualizacion_cliente(billing_phone, order_data, status_from, status_to)
+                    enviar_actualizacion_admin(order_data, status_from, status_to)
+                return jsonify({"status": "success"}), 200
+            
+            return jsonify({"status": "error", "message": "Invalid secret"}), 403
         except Exception as e:
             print(f"Error procesando webhook WooCommerce: {e}")
             return jsonify({"status": "error", "message": str(e)}), 500
     
     # Manejar webhook de WhatsApp
     try:
+        data = request.get_json()
+        if 'object' not in data or data['object'] != 'whatsapp_business_account':
+            return jsonify({"status": "error"}, 400)
+            
         if 'messages' not in data['entry'][0]['changes'][0]['value']:
-            return jsonify({"status": "success"}), 200
-        
-        telefonoCliente = data['entry'][0]['changes'][0]['value']['messages'][0]['from']
-        mensaje = data['entry'][0]['changes'][0]['value']['messages'][0]['text']['body'].lower()
-
-        # Saludos iniciales
-        if any(palabra in mensaje for palabra in ["hola", "hi", "hello", "buenos días", "buenas tardes", "buenas"]):
-            enviar(telefonoCliente, PLANTILLA_BIENVENIDA)
-            return jsonify({"status": "success"}), 200
-        
-        # Agradecimientos
-        if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["agradecimiento"]):
-            enviar(telefonoCliente, "¡Con gusto! ¿En qué más puedo ayudarte? 😊")
-            return jsonify({"status": "success"}), 200
-        
-        # Despedidas
-        if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["despedida"]):
-            enviar(telefonoCliente, PLANTILLA_DESPEDIDA)
-            return jsonify({"status": "success"}), 200
-        
-        # Notificaciones
-        if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["notificaciones"]):
-            enviar(telefonoCliente, MENSAJE_NOTIFICACIONES)
-            return jsonify({"status": "success"}), 200
-        
-        # Solicitud de contacto humano
-        if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["contacto_humano"]):
-            intentos = obtener_estado(telefonoCliente, "intentos_fuera_contexto", 0)
-            if intentos >= 2:
-                enviar(telefonoCliente, MENSAJE_CONTACTO_HUMANO)
-                actualizar_estado(telefonoCliente, "intentos_fuera_contexto", 0)
-            else:
-                enviar(telefonoCliente, "Por favor, indícame exactamente en qué necesitas ayuda para poder asistirte mejor. Si no logro resolver tu consulta, te proporcionaré nuestro contacto.")
-            return jsonify({"status": "success"}), 200
-
-        # Búsqueda en preguntas frecuentes
-        encontrado, respuesta_faq = buscar_en_preguntas_frecuentes(mensaje)
-        
-        if encontrado:
-            enviar(telefonoCliente, respuesta_faq)
-        else:
-            manejar_respuesta_gemini(telefonoCliente, mensaje)
-
-        return jsonify({"status": "success"}), 200
-
+            return jsonify({"status": "success"}, 200)
     except Exception as e:
-        print(f"Error procesando mensaje de WhatsApp: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        print(f"Error procesando webhook WhatsApp: {e}")
+        return jsonify({"status": "error"}, 400)
 
-# Ruta raíz para verificar que el servidor está funcionando
+    telefonoCliente = data['entry'][0]['changes'][0]['value']['messages'][0]['from']
+    mensaje = data['entry'][0]['changes'][0]['value']['messages'][0]['text']['body'].lower()
+
+    # Saludos iniciales
+    if any(palabra in mensaje for palabra in ["hola", "hi", "hello", "buenos días", "buenas tardes", "buenas"]):
+        enviar(telefonoCliente, PLANTILLA_BIENVENIDA)
+        return jsonify({"status": "success"}, 200)
+    
+    # Agradecimientos
+    if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["agradecimiento"]):
+        enviar(telefonoCliente, "¡Con gusto! ¿En qué más puedo ayudarte? 😊")
+        return jsonify({"status": "success"}, 200)
+    
+    # Despedidas
+    if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["despedida"]):
+        enviar(telefonoCliente, PLANTILLA_DESPEDIDA)
+        return jsonify({"status": "success"}, 200)
+    
+    # Notificaciones
+    if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["notificaciones"]):
+        enviar(telefonoCliente, MENSAJE_NOTIFICACIONES)
+        return jsonify({"status": "success"}, 200)
+    
+    # Solicitud de contacto humano
+    if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["contacto_humano"]):
+        intentos = obtener_estado(telefonoCliente, "intentos_fuera_contexto", 0)
+        if intentos >= 2:
+            enviar(telefonoCliente, MENSAJE_CONTACTO_HUMANO)
+            actualizar_estado(telefonoCliente, "intentos_fuera_contexto", 0)
+        else:
+            enviar(telefonoCliente, "Por favor, indícame exactamente en qué necesitas ayuda para poder asistirte mejor. Si no logro resolver tu consulta, te proporcionaré nuestro contacto.")
+        return jsonify({"status": "success"}, 200)
+
+    # Búsqueda en preguntas frecuentes
+    encontrado, respuesta_faq = buscar_en_preguntas_frecuentes(mensaje)
+    
+    if encontrado:
+        enviar(telefonoCliente, respuesta_faq)
+    else:
+        manejar_respuesta_gemini(telefonoCliente, mensaje)
+
+    return jsonify({"status": "success"}, 200)
+
+# ==============================================
+# ENDPOINT DE PRUEBA
+# ==============================================
+
 @app.route("/")
 def index():
-    return "Servidor de LD Make Up funcionando correctamente"
+    return "Bot de WhatsApp LD Make Up está en línea"
 
 # ==============================================
 # INICIO DE LA APLICACIÓN
 # ==============================================
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', debug=False)
