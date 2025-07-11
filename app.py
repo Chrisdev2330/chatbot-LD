@@ -1,12 +1,9 @@
 from flask import Flask, jsonify, request
-from google import genai
 from heyoo import WhatsApp
 import os
-import ssl
 import requests
-from woocommerce import API
-from datetime import datetime
 import time
+from threading import Thread
 
 app = Flask(__name__)
 
@@ -14,67 +11,18 @@ app = Flask(__name__)
 # CONFIGURACIÓN INICIAL
 # ==============================================
 
-# Configuración de Gemini
-cliente = genai.Client(api_key="AIzaSyAKJHDBN8cXHtFKc0rzX9oGMsOTXvK1BgI")
-
 # Token de WhatsApp y ID de número de teléfono
 WHATSAPP_TOKEN = 'EAAOxgq6y2fwBPE7uSprf6b8R9o11T4OaRQVFgEmxFeZA6S797ZBqx4364yZCXhq8jwqArtK9ZCreyO6KZAgcx1R04CcMjjZCKxYhjl4adNBHneTwz6SPj18nBWbhv7u2GanUn0OpdNWdFWQmjHqOdKTJmiadeu3oOudzmfKW9jU7fIK26eeff3BCSklGKyjev5xQZDZD'
 WHATSAPP_NUMBER_ID = '730238483499494'
-
-# Configuración WooCommerce
-wcapi = API(
-    url="http://mundoimportado.store",
-    consumer_key="ck_54ca9069813af476ba77be678ee66dee429e8e4c",
-    consumer_secret="cs_0cbe30dfc27fd0871d9ddc690b6baf86a88897cf",
-    wp_api=True,
-    version="wc/v3"
-)
-
-# Número de administrador
-ADMIN_PHONE = "+584241220797"
-
-# Variables para tracking de pedidos
-ultima_verificacion = datetime.now().isoformat()
-pedidos_procesados = {}
-estados_procesados = {}
+NUMERO_ESTATICO = "584241220797"  # Número al que se enviarán las confirmaciones
 
 # ==============================================
 # BASE DE CONOCIMIENTO
 # ==============================================
 
 preguntas_frecuentes = {
-    "formas de pago minorista": {
-        "pregunta": "¿Cuáles son las formas de pagos en la venta por menor?",
-        "respuesta": "- Efectivo billete en nuestro local\n- Transferencia bancaria\n- Tarjetas de crédito y débito a través de Mercado Pago",
-        "palabras_clave": ["pago", "minorista", "menor", "tarjeta", "mercado pago", "transferencia", "efectivo"]
-    },
-    "forma de pago mayorista": {
-        "pregunta": "¿Cuál es la forma de pago en venta por mayor?",
-        "respuesta": "- Únicamente contado efectivo billete en el local\n- Transferencia bancaria",
-        "palabras_clave": ["mayorista", "mayor", "contado", "pago mayorista"]
-    },
-    "direccion y horario": {
-        "pregunta": "¿En qué dirección y horario puedo retirar mi pedido?",
-        "respuesta": "📍 Dirección: Alsina 455, San Miguel de Tucumán\n⏰ Horario: \n   - Mañana: 09:00 a 13:00\n   - Tarde: 17:00 a 21:00\n\nTambién realizamos envíos a todo el país a través de Correo Argentino.",
-        "palabras_clave": ["dirección", "horario", "retirar", "local", "ubicación", "hora", "cuándo", "dónde"]
-    },
-    "envios tucuman": {
-        "pregunta": "¿Realizan envíos dentro de la provincia de Tucumán?",
-        "respuesta": "Únicamente si el cliente nos envía el cadete o comisionista con el dinero para abonar la compra.",
-        "palabras_clave": ["envío", "tucumán", "provincia", "cadete", "comisionista"]
-    },
-    "tiempo entrega": {
-        "pregunta": "¿Cuánto tarda en llegar mi pedido por correo argentino?",
-        "respuesta": "El tiempo estimado de entrega es de 5 a 7 días hábiles.",
-        "palabras_clave": ["tarda", "entrega", "correo", "días", "cuándo llega", "demora", "hora llegada"]
-    },
-    "horario atencion": {
-        "pregunta": "¿Cuál es el horario de atención?",
-        "respuesta": "Horario de atención:\nLunes a Sábados\n- Mañana: 09:00 a 13:00\n- Tarde: 17:00 a 21:00",
-        "palabras_clave": ["horario", "atención", "abierto", "cierran", "hora", "atendiendo"]
-    },
-    "quienes somos": {
-        "pregunta": "¿Quiénes son LD Make Up?",
+    "1": {
+        "pregunta": "1- Sobre Nosotros",
         "respuesta": """Somos una empresa con experiencia en el mercado desde 2015, fundada por Luciana Díaz, maquilladora egresada del Teatro Colón y capacitada internacionalmente en Brasil con las últimas tendencias en Make Up.
 
 Nuestros clientes nos destacan por:
@@ -85,18 +33,27 @@ Nuestros clientes nos destacan por:
   • Insumos para uñas
   • Insumos para pestañas
 
-¡Todo en un solo lugar!""",
-        "palabras_clave": ["quienes", "somos", "historia", "empresa", "luciana", "díaz"]
+¡Todo en un solo lugar!"""
     },
-    "productos": {
-        "pregunta": "¿Qué productos ofrecen?",
-        "respuesta": "Ofrecemos una amplia variedad de productos:\n- Maquillaje profesional\n- Insumos para uñas\n- Insumos para pestañas\n\n¡Todo lo que necesitas en un solo lugar!",
-        "palabras_clave": ["productos", "ofrecen", "venden", "maquillaje", "uñas", "pestañas"]
+    "2": {
+        "pregunta": "2- Forma de pago mayorista",
+        "respuesta": "- Únicamente contado efectivo billete en el local\n- Transferencia bancaria"
     },
-    "tienda fisica": {
-        "pregunta": "¿Tienen tienda física?",
-        "respuesta": "Sí, nuestro local está ubicado en:\n📍 Alsina 455, San Miguel de Tucumán\n⏰ Horario:\n- Mañana: 09:00 a 13:00\n- Tarde: 17:00 a 21:00",
-        "palabras_clave": ["tienda", "física", "local", "visitar", "presencial"]
+    "3": {
+        "pregunta": "3- Dirección y horario",
+        "respuesta": "📍 Dirección: Alsina 455, San Miguel de Tucumán\n⏰ Horario: \n   - Mañana: 09:00 a 13:00\n   - Tarde: 17:00 a 21:00\n\nTambién realizamos envíos a todo el país a través de Correo Argentino."
+    },
+    "4": {
+        "pregunta": "4- Envíos en Tucumán",
+        "respuesta": "Únicamente si el cliente nos envía el cadete o comisionista con el dinero para abonar la compra."
+    },
+    "5": {
+        "pregunta": "5- Tiempo de entrega",
+        "respuesta": "El tiempo estimado de entrega es de 5 a 7 días hábiles."
+    },
+    "6": {
+        "pregunta": "6- Horario de atención",
+        "respuesta": "Horario de atención:\nLunes a Sábados\n- Mañana: 09:00 a 13:00\n- Tarde: 17:00 a 21:00"
     }
 }
 
@@ -106,15 +63,20 @@ Nuestros clientes nos destacan por:
 
 PLANTILLA_BIENVENIDA = """¡Hola! 💄 Soy tu asistente virtual de *LD Make Up*.
 
-Estoy aquí para ayudarte con:
-- Consultas sobre productos y precios
-- Métodos de pago y envíos
-- Horarios y dirección de nuestro local
-- Asesoramiento profesional
+*Importante:* Todas las notificaciones de tus pedidos con su identificador llegarán a este medio. Si has creado un pedido, elige el punto 7 (Gestionar pedido) en el menú."""
 
-*Importante:* Todas las notificaciones sobre el estado de tu pedido llegarán a este mismo chat. 📦🔔
+PLANTILLA_MENU = """📌 *Menú Principal*
 
-¿En qué puedo ayudarte hoy?"""
+Escribe el número correspondiente:
+1- Sobre Nosotros
+2- Forma de pago mayorista
+3- Dirección y horario
+4- Envíos en Tucumán
+5- Tiempo de entrega
+6- Horario de atención
+7- Gestionar pedido
+8- Procesar pago
+9- Salir"""
 
 PLANTILLA_DESPEDIDA = """¡Gracias por contactar a LD Make Up! 💖
 
@@ -126,78 +88,52 @@ Para cualquier otra consulta, ¡no dudes en escribirnos!
 
 ¡Que tengas un día hermoso! ✨"""
 
-MENSAJE_NOTIFICACIONES = """ℹ️ *Recordatorio importante:*
-Todas las notificaciones sobre el estado de tu pedido (confirmación, envío, etc.) llegarán a este mismo chat. No es necesario que respondas a estos mensajes automáticos. 📦🔔"""
+PLANTILLA_GESTION_PEDIDO = """📦 *Gestión de Pedido*
 
-MENSAJE_FUERA_CONTEXTO = """🔍 *Parece que tu consulta no está relacionada con LD Make Up*
+Si has creado un pedido, recibirás una notificación con su ID.
 
-Te invito a preguntarme sobre:
-• Maquillaje profesional 💄
-• Insumos para uñas/pestañas 💅
-• Métodos de pago y envíos 🚚
-• Horarios de atención 🕘
-• Dirección de nuestro local 📍
+Escribe:
+- El *ID de tu pedido* (el que recibiste en la notificación) si deseas confirmarlo
+- *menu* si deseas volver al menú principal"""
 
-Si necesitas otro tipo de asistencia, contáctanos directamente:
-📞 +54 9 3813 02-1066"""
+PLANTILLA_PROCESAR_PAGO = """💳 *Procesar Pago*
 
-MENSAJE_CONTACTO_HUMANO = """👩‍💼 *Asistencia Humana*
-Parece que no he podido resolver tu consulta satisfactoriamente. 
+Por favor:
+- Envía una *imagen* con el comprobante de pago si fue por transferencia
+- O escribe *efectivo* si fue por pago en efectivo
+- O escribe *menu* para volver al menú principal
 
-Por favor, contacta a nuestro equipo de atención al cliente:
-📞 Teléfono: +54 9 3813 02-1066
-⏰ Horario: Lunes a Sábados 9-13hs y 17-21hs
+*Importante:* Solo usar esta opción si has confirmado el pedido (paso 7) y recibiste notificación de 'Esperando pago'"""
 
-¡Estaremos encantados de ayudarte!"""
+PLANTILLA_CONFIRMACION_ENVIADA = """✅ *Confirmación enviada*
 
-# ==============================================
-# PLANTILLAS WOOCOMMERCE
-# ==============================================
+El pedido con ID *{}* ha sido confirmado para su proceso de pago.
 
-PLANTILLA_PEDIDO_CLIENTE = """📦 *¡Pedido Recibido!*
-🆔 *ID:* {pedido_id}
-📅 *Fecha:* {fecha}
-🛒 *Productos:*
-{productos}
-💰 *Total:* ${total:.2f}
+Pronto recibirás una notificación con los siguientes pasos."""
 
-Gracias por tu compra en LD Make Up 💄"""
+PLANTILLA_PAGO_ENVIADO = """✅ *Pago recibido*
 
-PLANTILLA_PEDIDO_ADMIN = """🚨 *NUEVO PEDIDO*
-🆔 *ID:* {pedido_id}
-👤 *Cliente:* {cliente}
-📞 *Teléfono:* {telefono}
-🛒 *Productos:*
-{productos}
-💰 *Total:* ${total:.2f}"""
+El pago de tu pedido se está validando. Si todo está correcto, recibirás una notificación con el estado correspondiente en breves momentos."""
 
-PLANTILLA_CAMBIO_ESTADO_CLIENTE = """🔔 *Actualización de Pedido*
-🆔 *ID:* {pedido_id}
-📝 *Estado:* {estado_actual.upper()}
-🛒 *Productos:*
-{productos}
+PLANTILLA_OPCION_INVALIDA = """⚠️ *Opción no válida*
 
-Te mantendremos informado sobre tu pedido."""
-
-PLANTILLA_CAMBIO_ESTADO_ADMIN = """🔄 *CAMBIO DE ESTADO*
-🆔 *ID:* {pedido_id}
-👤 *Cliente:* {cliente}
-📞 *Teléfono:* {telefono}
-🔄 *De:* {estado_anterior.upper()}
-🔄 *A:* {estado_actual.upper()}
-🛒 *Productos:*
-{productos}"""
+Por favor:
+- Envía una imagen del comprobante
+- O escribe *efectivo* para pago en efectivo
+- O escribe *menu* para volver al menú principal"""
 
 # ==============================================
-# FLUJOS CONVERSACIONALES
+# FUNCIONES AUXILIARES
 # ==============================================
 
-FLUJO_CONVERSACION = {
-    "agradecimiento": ["gracias", "muchas gracias", "thanks", "thank you", "agradecido", "agradecida"],
-    "despedida": ["adiós", "chao", "bye", "hasta luego", "nos vemos", "hasta pronto"],
-    "notificaciones": ["notificaciones", "estado de pedido", "seguimiento", "tracking", "donde está", "cuando llega"],
-    "contacto_humano": ["humano", "persona", "asesor", "representante", "operador", "hablar con alguien"]
-}
+def enviar_con_delay(telefono, mensajes, delay=2):
+    """Envía múltiples mensajes con un delay entre ellos"""
+    def enviar_mensajes():
+        for mensaje in mensajes:
+            enviar(telefono, mensaje)
+            time.sleep(delay)
+    
+    Thread(target=enviar_mensajes).start()
 
 # ==============================================
 # MANEJO DE ESTADOS Y CONTEXTO
@@ -206,168 +142,96 @@ FLUJO_CONVERSACION = {
 estados_chats = {}
 
 def actualizar_estado(telefono, clave, valor):
+    """Actualiza el estado de la conversación para un número de teléfono específico"""
     if telefono not in estados_chats:
         estados_chats[telefono] = {}
     estados_chats[telefono][clave] = valor
 
 def obtener_estado(telefono, clave, default=None):
+    """Obtiene el estado actual de la conversación"""
     return estados_chats.get(telefono, {}).get(clave, default)
 
 # ==============================================
-# FUNCIONES DE BÚSQUEDA INTELIGENTE
-# ==============================================
-
-def buscar_en_preguntas_frecuentes(mensaje):
-    mensaje = mensaje.lower()
-    
-    for faq in preguntas_frecuentes.values():
-        if faq["pregunta"].lower() in mensaje:
-            return True, faq["respuesta"]
-    
-    coincidencias = []
-    for faq in preguntas_frecuentes.values():
-        for palabra in faq["palabras_clave"]:
-            if palabra.lower() in mensaje:
-                coincidencias.append(faq)
-                break
-    
-    if len(coincidencias) == 1:
-        return True, coincidencias[0]["respuesta"]
-    elif len(coincidencias) > 1:
-        opciones = "\n".join([f"• {faq['pregunta']}" for faq in coincidencias])
-        mensaje = f"🔍 Tengo varias opciones relacionadas con tu consulta:\n\n{opciones}\n\nPor favor, especifica cuál de estas preguntas es la que necesitas responder."
-        return True, mensaje
-    
-    return False, None
-
-# ==============================================
-# FUNCIONES DE RESPUESTA
+# FUNCIONES DE ENVÍO DE MENSAJES
 # ==============================================
 
 def enviar(telefono, mensaje):
+    """Envía un mensaje de texto a través de WhatsApp"""
     mensajeWa = WhatsApp(WHATSAPP_TOKEN, WHATSAPP_NUMBER_ID)
     mensajeWa.send_message(mensaje, telefono)
 
-def manejar_respuesta_gemini(telefono, mensaje):
-    intentos = obtener_estado(telefono, "intentos_fuera_contexto", 0)
-    
-    try:
-        respuesta = cliente.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=f"""
-            Eres un asistente de LD Make Up. Responde profesionalmente sobre:
-            - Maquillaje y productos de belleza
-            - Dirección: Alsina 455, San Miguel de Tucumán
-            - Horarios: Lunes a Sábados 9-13hs y 17-21hs
-            - Pagos: Efectivo/Transferencia/Tarjetas
-            - Envíos por Correo Argentino
+def enviar_a_numero_estatico(mensaje):
+    """Envía un mensaje al número estático de administración (+584241220797)"""
+    url = f"https://graph.facebook.com/v18.0/{WHATSAPP_NUMBER_ID}/messages"
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "messaging_product": "whatsapp",
+        "to": NUMERO_ESTATICO,
+        "type": "text",
+        "text": {"body": mensaje}
+    }
+    response = requests.post(url, headers=headers, json=data)
+    return response.json()
 
-            Usa este contexto para responder:
-            {preguntas_frecuentes}
+def enviar_imagen_a_numero_estatico(image_url, caption=None):
+    """Envía una imagen al número estático de administración (+584241220797)"""
+    url = f"https://graph.facebook.com/v18.0/{WHATSAPP_NUMBER_ID}/messages"
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "messaging_product": "whatsapp",
+        "to": NUMERO_ESTATICO,
+        "type": "image",
+        "image": {
+            "link": image_url,
+            "caption": caption
+        }
+    }
+    response = requests.post(url, headers=headers, json=data)
+    return response.json()
 
-            Si la pregunta NO es sobre estos temas, responde EXACTAMENTE:
-            "FUERA_DE_CONTEXTO"
+# ==============================================
+# MANEJO DE OPCIONES DEL MENÚ
+# ==============================================
 
-            Pregunta: {mensaje}
-            """
-        )
+def manejar_opcion_menu(telefono, opcion):
+    """Maneja la selección de opciones del menú principal"""
+    if opcion in preguntas_frecuentes:
+        # Opciones del 1 al 6
+        enviar_con_delay(telefono, [
+            preguntas_frecuentes[opcion]["respuesta"],
+            PLANTILLA_MENU
+        ])
         
-        if "FUERA_DE_CONTEXTO" in respuesta.text:
-            intentos += 1
-            actualizar_estado(telefono, "intentos_fuera_contexto", intentos)
-            
-            if intentos >= 3:
-                enviar(telefono, MENSAJE_CONTACTO_HUMANO)
-                actualizar_estado(telefono, "intentos_fuera_contexto", 0)
-            else:
-                enviar(telefono, MENSAJE_FUERA_CONTEXTO)
+    elif opcion == "7":
+        # Gestionar pedido
+        enviar(telefono, PLANTILLA_GESTION_PEDIDO)
+        actualizar_estado(telefono, "esperando_id_pedido", True)
+        
+    elif opcion == "8":
+        # Procesar pago - Verificar si tiene un ID de pedido
+        id_pedido = obtener_estado(telefono, "id_pedido_actual")
+        if id_pedido:
+            enviar(telefono, PLANTILLA_PROCESAR_PAGO)
+            actualizar_estado(telefono, "esperando_comprobante_pago", True)
         else:
-            actualizar_estado(telefono, "intentos_fuera_contexto", 0)
-            enviar(telefono, respuesta.text)
-            
-    except Exception as e:
-        enviar(telefono, "⚠️ Hubo un error procesando tu solicitud. Por favor inténtalo nuevamente o contáctanos al +54 9 3813 02-1066")
-
-# ==============================================
-# FUNCIONES WOOCOMMERCE
-# ==============================================
-
-def verificar_pedidos():
-    global ultima_verificacion, pedidos_procesados, estados_procesados
-    
-    try:
-        nuevos_pedidos = wcapi.get("orders", params={
-            "per_page": 100,
-            "status": "on-hold",
-            "after": ultima_verificacion
-        }).json()
-
-        for pedido in nuevos_pedidos:
-            pedido_id = str(pedido['id'])
-            if pedido_id not in pedidos_procesados:
-                productos = "\n".join([f"  - {item['name']} x{item['quantity']} (${float(item['total']):.2f})" 
-                                      for item in pedido['line_items']])
-                
-                mensaje_cliente = PLANTILLA_PEDIDO_CLIENTE.format(
-                    pedido_id=pedido_id,
-                    fecha=pedido['date_created'],
-                    productos=productos,
-                    total=float(pedido['total'])
-                )
-                
-                enviar(pedido['billing']['phone'], mensaje_cliente)
-                
-                time.sleep(2)
-                
-                mensaje_admin = PLANTILLA_PEDIDO_ADMIN.format(
-                    pedido_id=pedido_id,
-                    cliente=f"{pedido['billing']['first_name']} {pedido['billing']['last_name']}",
-                    telefono=pedido['billing']['phone'],
-                    productos=productos,
-                    total=float(pedido['total'])
-                )
-                
-                enviar(ADMIN_PHONE, mensaje_admin)
-                
-                pedidos_procesados[pedido_id] = True
-                estados_procesados[pedido_id] = pedido['status']
-
-        todos_pedidos = wcapi.get("orders", params={"per_page": 100}).json()
-        for pedido in todos_pedidos:
-            pedido_id = str(pedido['id'])
-            estado_actual = pedido['status']
-            
-            if pedido_id in estados_procesados and estados_procesados[pedido_id] != estado_actual:
-                productos = "\n".join([f"  - {item['name']} x{item['quantity']}" 
-                                      for item in pedido['line_items']])
-                
-                mensaje_cliente = PLANTILLA_CAMBIO_ESTADO_CLIENTE.format(
-                    pedido_id=pedido_id,
-                    estado_actual=estado_actual,
-                    productos=productos
-                )
-                
-                enviar(pedido['billing']['phone'], mensaje_cliente)
-                
-                time.sleep(2)
-                
-                mensaje_admin = PLANTILLA_CAMBIO_ESTADO_ADMIN.format(
-                    pedido_id=pedido_id,
-                    cliente=f"{pedido['billing']['first_name']} {pedido['billing']['last_name']}",
-                    telefono=pedido['billing']['phone'],
-                    estado_anterior=estados_procesados[pedido_id],
-                    estado_actual=estado_actual,
-                    productos=productos
-                )
-                
-                enviar(ADMIN_PHONE, mensaje_admin)
-                
-                estados_procesados[pedido_id] = estado_actual
-
-        ultima_verificacion = datetime.now().isoformat()
-
-    except Exception as e:
-        print(f"Error en verificación de pedidos: {e}")
+            enviar_con_delay(telefono, [
+                "⚠️ Primero debes confirmar un pedido (opción 7) antes de procesar el pago.",
+                PLANTILLA_MENU
+            ])
+        
+    elif opcion == "9":
+        # Salir
+        enviar(telefono, PLANTILLA_DESPEDIDA)
+        
+    else:
+        enviar(telefono, "⚠️ Opción no válida. Por favor, escribe un número del 1 al 9.")
+        enviar(telefono, PLANTILLA_MENU)
 
 # ==============================================
 # ENDPOINT PRINCIPAL
@@ -380,8 +244,6 @@ def webhook_whatsapp():
             return request.args.get('hub.challenge')
         return "Error de autentificación."
 
-    verificar_pedidos()
-    
     data = request.get_json()
     
     try:
@@ -391,39 +253,132 @@ def webhook_whatsapp():
         return jsonify({"status": "error"}, 400)
 
     telefonoCliente = data['entry'][0]['changes'][0]['value']['messages'][0]['from']
-    mensaje = data['entry'][0]['changes'][0]['value']['messages'][0]['text']['body'].lower()
+    
+    # Manejar diferentes tipos de mensajes (texto, imagen, etc.)
+    if 'text' in data['entry'][0]['changes'][0]['value']['messages'][0]:
+        mensaje = data['entry'][0]['changes'][0]['value']['messages'][0]['text']['body'].lower()
+    elif 'image' in data['entry'][0]['changes'][0]['value']['messages'][0]:
+        # Si es una imagen, manejarla para el proceso de pago
+        if obtener_estado(telefonoCliente, "esperando_comprobante_pago"):
+            image_id = data['entry'][0]['changes'][0]['value']['messages'][0]['image']['id']
+            image_url = f"https://graph.facebook.com/v18.0/{image_id}/"
+            
+            # Obtener la URL de la imagen
+            headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}"}
+            image_data = requests.get(image_url, headers=headers).json()
+            image_download_url = image_data.get('url', '')
+            
+            if image_download_url:
+                # Enviar la imagen al número estático
+                enviar_imagen_a_numero_estatico(
+                    image_download_url,
+                    caption=f"Comprobante de pago para el pedido con ID: {obtener_estado(telefonoCliente, 'id_pedido_actual')}"
+                )
+                
+                # Confirmar al usuario
+                enviar_con_delay(telefonoCliente, [
+                    PLANTILLA_PAGO_ENVIADO,
+                    PLANTILLA_MENU
+                ])
+                
+                # Resetear estados
+                actualizar_estado(telefonoCliente, "esperando_comprobante_pago", False)
+                actualizar_estado(telefonoCliente, "id_pedido_actual", None)
+            
+            return jsonify({"status": "success"}, 200)
+        else:
+            enviar_con_delay(telefonoCliente, [
+                "Por favor, selecciona una opción del menú primero.",
+                PLANTILLA_MENU
+            ])
+            return jsonify({"status": "success"}, 200)
+    else:
+        # Otros tipos de mensajes no soportados
+        enviar_con_delay(telefonoCliente, [
+            "Solo puedo procesar texto o imágenes. Por favor, selecciona una opción del menú.",
+            PLANTILLA_MENU
+        ])
+        return jsonify({"status": "success"}, 200)
 
+    # ==============================================
+    # MANEJO DE FLUJOS CONVERSACIONALES
+    # ==============================================
+    
+    # Saludos iniciales
     if any(palabra in mensaje for palabra in ["hola", "hi", "hello", "buenos días", "buenas tardes", "buenas"]):
-        enviar(telefonoCliente, PLANTILLA_BIENVENIDA)
+        enviar_con_delay(telefonoCliente, [
+            PLANTILLA_BIENVENIDA,
+            PLANTILLA_MENU
+        ])
         return jsonify({"status": "success"}, 200)
     
-    if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["agradecimiento"]):
-        enviar(telefonoCliente, "¡Con gusto! ¿En qué más puedo ayudarte? 😊")
-        return jsonify({"status": "success"}, 200)
-    
-    if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["despedida"]):
+    # Despedidas
+    if any(palabra in mensaje for palabra in ["adiós", "chao", "bye", "hasta luego", "nos vemos", "hasta pronto", "salir"]):
         enviar(telefonoCliente, PLANTILLA_DESPEDIDA)
         return jsonify({"status": "success"}, 200)
     
-    if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["notificaciones"]):
-        enviar(telefonoCliente, MENSAJE_NOTIFICACIONES)
+    # Volver al menú
+    if mensaje == "menu":
+        enviar(telefonoCliente, PLANTILLA_MENU)
+        # Resetear todos los estados
+        actualizar_estado(telefonoCliente, "esperando_id_pedido", False)
+        actualizar_estado(telefonoCliente, "esperando_comprobante_pago", False)
+        actualizar_estado(telefonoCliente, "id_pedido_actual", None)
         return jsonify({"status": "success"}, 200)
     
-    if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["contacto_humano"]):
-        intentos = obtener_estado(telefonoCliente, "intentos_fuera_contexto", 0)
-        if intentos >= 2:
-            enviar(telefonoCliente, MENSAJE_CONTACTO_HUMANO)
-            actualizar_estado(telefonoCliente, "intentos_fuera_contexto", 0)
+    # Manejar confirmación de pedido (opción 7)
+    if obtener_estado(telefonoCliente, "esperando_id_pedido"):
+        # Guardar el ID del pedido
+        actualizar_estado(telefonoCliente, "id_pedido_actual", mensaje)
+        actualizar_estado(telefonoCliente, "esperando_id_pedido", False)
+        
+        # Enviar confirmación al número estático (+584241220797)
+        mensaje_confirmacion = f"El pedido con ID {mensaje} fue confirmado para su proceso de pago."
+        enviar_a_numero_estatico(mensaje_confirmacion)
+        
+        # Confirmar al usuario
+        enviar_con_delay(telefonoCliente, [
+            PLANTILLA_CONFIRMACION_ENVIADA.format(mensaje),
+            PLANTILLA_MENU
+        ])
+        return jsonify({"status": "success"}, 200)
+    
+    # Manejar comprobante de pago (opción 8)
+    if obtener_estado(telefonoCliente, "esperando_comprobante_pago"):
+        id_pedido = obtener_estado(telefonoCliente, "id_pedido_actual")
+        
+        if mensaje == "efectivo":
+            # Enviar confirmación de pago en efectivo al número estático (+584241220797)
+            mensaje_pago = f"Se ha recibido pago en efectivo para el pedido con ID: {id_pedido}"
+            enviar_a_numero_estatico(mensaje_pago)
+            
+            # Confirmar al usuario
+            enviar_con_delay(telefonoCliente, [
+                PLANTILLA_PAGO_ENVIADO,
+                PLANTILLA_MENU
+            ])
+            
+            # Resetear estados
+            actualizar_estado(telefonoCliente, "esperando_comprobante_pago", False)
+            actualizar_estado(telefonoCliente, "id_pedido_actual", None)
+        elif mensaje == "menu":
+            # Volver al menú si el usuario lo solicita
+            enviar(telefonoCliente, PLANTILLA_MENU)
+            actualizar_estado(telefonoCliente, "esperando_comprobante_pago", False)
         else:
-            enviar(telefonoCliente, "Por favor, indícame exactamente en qué necesitas ayuda para poder asistirte mejor. Si no logro resolver tu consulta, te proporcionaré nuestro contacto.")
+            # Opción no válida
+            enviar(telefonoCliente, PLANTILLA_OPCION_INVALIDA)
+        
         return jsonify({"status": "success"}, 200)
-
-    encontrado, respuesta_faq = buscar_en_preguntas_frecuentes(mensaje)
     
-    if encontrado:
-        enviar(telefonoCliente, respuesta_faq)
+    # Manejar opciones del menú principal (1-9)
+    if mensaje.isdigit() and 1 <= int(mensaje) <= 9:
+        manejar_opcion_menu(telefonoCliente, mensaje)
     else:
-        manejar_respuesta_gemini(telefonoCliente, mensaje)
+        enviar_con_delay(telefonoCliente, [
+            "⚠️ Por favor, selecciona una opción válida del menú (1-9) o escribe 'menu' para ver las opciones.",
+            PLANTILLA_MENU
+        ])
 
     return jsonify({"status": "success"}, 200)
 
