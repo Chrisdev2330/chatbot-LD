@@ -57,12 +57,12 @@ PLANTILLA_BIENVENIDA = """¡Hola! 💄 Soy tu asistente virtual de *LD Make Up*.
 PLANTILLA_MENU = """📌 *Menú Principal*
 
 Escribe el número correspondiente:
-1- Sobre Nosotros
-2- Forma de pago mayorista
-3- Dirección y horario
-4- Envíos en Tucumán
-5- Tiempo de entrega
-6- Horario de atención
+1- ¿Quiénes son LD Make Up?
+2- ¿Cuál es la forma de pago en venta por mayor?
+3- ¿En qué dirección y horario puedo retirar mi pedido?
+4- ¿Realizan envíos dentro de la provincia de Tucumán?
+5- ¿Cuánto tarda en llegar mi pedido por correo argentino?
+6- ¿Cuál es el horario de atención?
 7- Gestionar pedido
 8- Procesar pago
 9- Salir"""
