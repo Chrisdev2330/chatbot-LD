@@ -2,6 +2,7 @@ from flask import Flask, jsonify, request
 from heyoo import WhatsApp
 import os
 import requests
+import re
 import time
 from threading import Thread
 
@@ -22,7 +23,17 @@ NUMERO_ESTATICO = "584241220797"
 preguntas_frecuentes = {
     "1": {
         "pregunta": "1- Sobre Nosotros",
-        "respuesta": """Somos una empresa con experiencia en el mercado desde 2015, fundada por Luciana Díaz..."""
+        "respuesta": """Somos una empresa con experiencia en el mercado desde 2015, fundada por Luciana Díaz, maquilladora egresada del Teatro Colón y capacitada internacionalmente en Brasil con las últimas tendencias en Make Up.
+
+Nuestros clientes nos destacan por:
+- Excelente atención y asesoramiento
+- Equipo altamente capacitado
+- Amplia variedad de productos en:
+  • Maquillaje
+  • Insumos para uñas
+  • Insumos para pestañas
+
+¡Todo en un solo lugar!"""
     },
     "2": {
         "pregunta": "2- Forma de pago mayorista",
@@ -30,7 +41,7 @@ preguntas_frecuentes = {
     },
     "3": {
         "pregunta": "3- Dirección y horario",
-        "respuesta": "📍 Dirección: Alsina 455, San Miguel de Tucumán\n⏰ Horario: \n   - Mañana: 09:00 a 13:00\n   - Tarde: 17:00 a 21:00"
+        "respuesta": "📍 Dirección: Alsina 455, San Miguel de Tucumán\n⏰ Horario: \n   - Mañana: 09:00 a 13:00\n   - Tarde: 17:00 a 21:00\n\nTambién realizamos envíos a todo el país a través de Correo Argentino."
     },
     "4": {
         "pregunta": "4- Envíos en Tucumán",
@@ -76,15 +87,37 @@ PLANTILLA_PROCESAR_PAGO = """💳 *Procesar Pago*
 Envía:
 - *Imagen* del comprobante (transferencia)
 - *efectivo* (pago en efectivo)
+- *Enlace de Google Drive* con el comprobante
 - *menu* (volver al menú)"""
 
 PLANTILLA_CONFIRMACION_ENVIADA = """✅ Confirmación enviada para el pedido *{}*"""
 
 PLANTILLA_PAGO_ENVIADO = """✅ Pago recibido. Validación en proceso."""
 
+PLANTILLA_DESPEDIDA = """¡Gracias por contactar a LD Make Up! 💖
+
+Recuerda que estamos en:
+📍 Alsina 455, San Miguel de Tucumán
+⏰ Lunes a Sábados: 09:00-13:00 y 17:00-21:00
+
+Para cualquier otra consulta, ¡no dudes en escribirnos!
+
+¡Que tengas un día hermoso! ✨"""
+
+PLANTILLA_OPCION_INVALIDA = """⚠️ *Opción no válida*
+
+Por favor selecciona una opción del menú (1-9) o escribe 'menu' para ver las opciones"""
+
 # ==============================================
-# FUNCIONES PRINCIPALES
+# FUNCIONES AUXILIARES
 # ==============================================
+
+def es_enlace_drive(url):
+    patrones = [
+        r'https?://drive\.google\.com/.+',
+        r'https?://docs\.google\.com/.+'
+    ]
+    return any(re.match(patron, url) for patron in patrones)
 
 def enviar(telefono, mensaje):
     try:
@@ -147,6 +180,30 @@ def obtener_url_imagen(image_id):
         print(f"Error al obtener imagen: {e}")
         return None
 
+def procesar_pago(telefono_cliente, contenido, id_pedido):
+    try:
+        mensaje_admin = f"🔄 Comprobante recibido para pedido: {id_pedido}\n"
+        
+        if contenido.startswith(('http://', 'https://')):
+            if es_enlace_drive(contenido):
+                mensaje_admin += f"📎 Enlace Drive: {contenido}"
+            else:
+                mensaje_admin += f"🔗 Enlace: {contenido}"
+        elif contenido == "efectivo":
+            mensaje_admin += "💵 Pago en efectivo"
+        
+        enviar_a_numero_estatico(mensaje_admin)
+        
+        enviar_con_delay(telefono_cliente, [
+            PLANTILLA_PAGO_ENVIADO,
+            PLANTILLA_MENU
+        ])
+        
+        return True
+    except Exception as e:
+        print(f"Error en procesar_pago: {e}")
+        return False
+
 # ==============================================
 # MANEJO DE ESTADOS
 # ==============================================
@@ -175,22 +232,25 @@ def webhook_whatsapp():
     data = request.get_json()
     
     try:
+        if 'messages' not in data['entry'][0]['changes'][0]['value']:
+            return jsonify({"status": "success"}, 200)
+
         telefonoCliente = data['entry'][0]['changes'][0]['value']['messages'][0]['from']
         
         if 'text' in data['entry'][0]['changes'][0]['value']['messages'][0]:
             mensaje = data['entry'][0]['changes'][0]['value']['messages'][0]['text']['body'].lower()
             
             # Manejo de saludos
-            if any(palabra in mensaje for palabra in ["hola", "hi", "hello"]):
+            if any(palabra in mensaje for palabra in ["hola", "hi", "hello", "buenos días", "buenas tardes", "buenas"]):
                 enviar_con_delay(telefonoCliente, [PLANTILLA_BIENVENIDA, PLANTILLA_MENU])
-                return jsonify({"status": "success"})
+                return jsonify({"status": "success"}, 200)
             
             # Manejo de menú
             if mensaje == "menu":
                 enviar(telefonoCliente, PLANTILLA_MENU)
                 actualizar_estado(telefonoCliente, "esperando_id_pedido", False)
                 actualizar_estado(telefonoCliente, "esperando_comprobante", False)
-                return jsonify({"status": "success"})
+                return jsonify({"status": "success"}, 200)
             
             # Opción 7 - Gestionar pedido
             if obtener_estado(telefonoCliente, "esperando_id_pedido"):
@@ -202,26 +262,34 @@ def webhook_whatsapp():
                     PLANTILLA_CONFIRMACION_ENVIADA.format(mensaje),
                     PLANTILLA_MENU
                 ])
-                return jsonify({"status": "success"})
+                return jsonify({"status": "success"}, 200)
             
             # Opción 8 - Procesar pago
             if obtener_estado(telefonoCliente, "esperando_comprobante"):
                 id_pedido = obtener_estado(telefonoCliente, "id_pedido_actual")
                 
-                if mensaje == "efectivo":
-                    enviar_a_numero_estatico(f"Pago en efectivo - ID Pedido: {id_pedido}")
+                if id_pedido:
+                    if mensaje == "efectivo":
+                        procesar_pago(telefonoCliente, mensaje, id_pedido)
+                    elif mensaje.startswith(('http://', 'https://')):
+                        if es_enlace_drive(mensaje):
+                            procesar_pago(telefonoCliente, mensaje, id_pedido)
+                        else:
+                            enviar(telefonoCliente, "⚠️ El enlace no es de Google Drive. Por favor usa un enlace válido.")
+                    elif mensaje == "menu":
+                        enviar(telefonoCliente, PLANTILLA_MENU)
+                    else:
+                        enviar(telefonoCliente, PLANTILLA_PROCESAR_PAGO)
+                    
+                    actualizar_estado(telefonoCliente, "esperando_comprobante", False)
+                    actualizar_estado(telefonoCliente, "id_pedido_actual", None)
+                else:
                     enviar_con_delay(telefonoCliente, [
-                        PLANTILLA_PAGO_ENVIADO,
+                        "⚠️ No se encontró número de pedido",
                         PLANTILLA_MENU
                     ])
-                elif mensaje == "menu":
-                    enviar(telefonoCliente, PLANTILLA_MENU)
-                else:
-                    enviar(telefonoCliente, PLANTILLA_PROCESAR_PAGO)
                 
-                actualizar_estado(telefonoCliente, "esperando_comprobante", False)
-                actualizar_estado(telefonoCliente, "id_pedido_actual", None)
-                return jsonify({"status": "success"})
+                return jsonify({"status": "success"}, 200)
             
             # Manejo de opciones del menú
             if mensaje.isdigit():
@@ -247,10 +315,14 @@ def webhook_whatsapp():
                 elif opcion == "9":
                     enviar(telefonoCliente, PLANTILLA_DESPEDIDA)
                 else:
-                    enviar(telefonoCliente, "⚠️ Opción no válida")
+                    enviar(telefonoCliente, PLANTILLA_OPCION_INVALIDA)
                     enviar(telefonoCliente, PLANTILLA_MENU)
                 
-                return jsonify({"status": "success"})
+                return jsonify({"status": "success"}, 200)
+            else:
+                enviar(telefonoCliente, PLANTILLA_OPCION_INVALIDA)
+                enviar(telefonoCliente, PLANTILLA_MENU)
+                return jsonify({"status": "success"}, 200)
             
         elif 'image' in data['entry'][0]['changes'][0]['value']['messages'][0]:
             if obtener_estado(telefonoCliente, "esperando_comprobante"):
@@ -260,25 +332,35 @@ def webhook_whatsapp():
                 if id_pedido:
                     image_url = obtener_url_imagen(image_id)
                     if image_url:
-                        enviar_a_numero_estatico(f"Comprobante recibido para pedido: {id_pedido}")
-                        enviar_imagen_a_numero_estatico(image_url, f"Comprobante ID: {id_pedido}")
+                        enviar_a_numero_estatico(f"📸 Comprobante en imagen para pedido: {id_pedido}")
+                        enviar_imagen_a_numero_estatico(image_url, f"ID Pedido: {id_pedido}")
                         enviar_con_delay(telefonoCliente, [
                             PLANTILLA_PAGO_ENVIADO,
                             PLANTILLA_MENU
                         ])
                     else:
-                        enviar(telefonoCliente, "⚠️ Error al procesar imagen")
+                        enviar(telefonoCliente, "⚠️ Error al procesar la imagen")
                 else:
                     enviar(telefonoCliente, "⚠️ No se encontró número de pedido")
                 
                 actualizar_estado(telefonoCliente, "esperando_comprobante", False)
                 actualizar_estado(telefonoCliente, "id_pedido_actual", None)
-                return jsonify({"status": "success"})
+                return jsonify({"status": "success"}, 200)
+            else:
+                enviar_con_delay(telefonoCliente, [
+                    "Por favor selecciona la opción 8 del menú para enviar comprobantes",
+                    PLANTILLA_MENU
+                ])
+                return jsonify({"status": "success"}, 200)
+        
+        else:
+            enviar(telefonoCliente, "⚠️ Solo se aceptan mensajes de texto o imágenes")
+            enviar(telefonoCliente, PLANTILLA_MENU)
+            return jsonify({"status": "success"}, 200)
             
     except Exception as e:
         print(f"Error en webhook: {e}")
-    
-    return jsonify({"status": "success"})
+        return jsonify({"status": "error"}, 500)
 
 # ==============================================
 # INICIO DE LA APLICACIÓN
