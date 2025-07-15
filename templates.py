@@ -1,6 +1,6 @@
-# Plantillas de mensajes para el bot
-
-PLANTILLA_BIENVENIDA = """¡Hola! 💄✨ Soy tu asistente virtual de *LD Make Up*.
+# Plantillas de mensajes
+TEMPLATES = {
+    "WELCOME": """¡Hola! 💄 Soy tu asistente virtual de *LD Make Up*.
 
 Estoy aquí para ayudarte con:
 - Consultas sobre productos y precios
@@ -8,15 +8,16 @@ Estoy aquí para ayudarte con:
 - Horarios y dirección de nuestro local
 - Asesoramiento profesional
 
-📌 *Importante:*
-- Todas las notificaciones sobre tu pedido llegarán aquí.
+*Importante:* 
 - Para confirmar tu pedido escribe *CONFIRMAR*
 - Para enviar comprobante de pago escribe *MIPAGO*
 - Escribe *SALIR* para cerrar la sesión
 
-¿En qué puedo ayudarte hoy? 💖"""
+Todas las notificaciones sobre el estado de tu pedido llegarán a este mismo chat. 📦🔔
 
-PLANTILLA_DESPEDIDA = """¡Gracias por contactar a LD Make Up! 💄💖
+¿En qué puedo ayudarte hoy?""",
+
+    "GOODBYE": """¡Gracias por contactar a LD Make Up! 💖
 
 Recuerda que estamos en:
 📍 Alsina 455, San Miguel de Tucumán
@@ -24,52 +25,25 @@ Recuerda que estamos en:
 
 Para cualquier otra consulta, ¡no dudes en escribirnos!
 
-¡Que tengas un día hermoso! ✨"""
+¡Que tengas un día hermoso! ✨""",
 
-MENSAJE_NOTIFICACIONES = """ℹ️ *Recordatorio importante:*
-Todas las notificaciones sobre el estado de tu pedido (confirmación, envío, etc.) llegarán a este mismo chat. No es necesario que respondas a estos mensajes automáticos. 📦🔔"""
+    "NOTIFICATIONS": """ℹ️ *Recordatorio importante:*
+Todas las notificaciones sobre el estado de tu pedido (confirmación, envío, etc.) llegarán a este mismo chat. No es necesario que respondas a estos mensajes automáticos. 📦🔔""",
 
-PLANTILLA_CONFIRMAR_PEDIDO = """Por favor escribe el *ID de tu pedido* para confirmarlo. 📝
+    "CONFIRM_PROMPT": """Por favor escribe el *ID de tu pedido* para confirmar:""",
 
-Ejemplo: *CONFIRMAR PED-12345*"""
+    "PAYMENT_PROMPT": """Por favor enviar el comprobante de pago con ID del pedido a este número: 
+👉 https://wa.me/584241220797 👈""",
 
-PLANTILLA_PEDIDO_CONFIRMADO = """✅ *Pedido confirmado con éxito!*
+    "CONFIRM_ADMIN_NOTIFICATION": """El cliente con número *{user_phone}* ha confirmado el pedido con ID: *{order_id}* ✅""",
 
-Tu pedido con ID *{pedido_id}* ha sido confirmado. 
+    "NEED_CONFIRM_FIRST": """⚠️ Para realizar el pago primero debes confirmar tu pedido. 
+Escribe *CONFIRMAR* para iniciar el proceso.""",
 
-Pronto recibirás actualizaciones sobre el estado de tu compra. ¡Gracias por confiar en LD Make Up! 💖"""
+    "UNRELATED_QUERY": """Parece que tu consulta no está relacionada con LD Make Up. 
+Por favor escribe algo relacionado con nuestros productos o servicios. 💄""",
 
-PLANTILLA_ENVIAR_COMPROBANTE = """💳 *Enviar comprobante de pago*
-
-Por favor envía el comprobante de pago junto con el ID de tu pedido a este número: 
-📲 {admin_number}
-
-(Haz clic en el número para iniciar el chat)"""
-
-PLANTILLA_CONFIRMAR_PRIMERO = """⚠️ *Primero debes confirmar tu pedido*
-
-Para continuar con el pago, primero debes confirmar tu pedido escribiendo *CONFIRMAR*. 
-
-Si ya lo hiciste y ves este mensaje, escribe *SALIR* y vuelve a iniciar el proceso. 💖"""
-
-PLANTILLA_FUERA_CONTEXTO = """¡Hola! 👋 Parece que tu consulta no está relacionada con LD Make Up.
-
-Por favor, escribe algo relacionado con nuestros productos o servicios de maquillaje para poder ayudarte mejor. 💄✨
-
-Si necesitas ayuda con otra cosa, puedes contactar a nuestro equipo al {admin_number}."""
-
-PLANTILLA_CONTACTO_SOPORTE = """👩‍💼 *Asistencia personalizada*
-
-Para consultas muy específicas o asistencia personalizada, por favor contacta a nuestro equipo de soporte aquí:
-📲 {admin_number}
-
-(Haz clic en el número para iniciar el chat)"""
-
-FLUJO_CONVERSACION = {
-    "agradecimiento": ["gracias", "muchas gracias", "thanks", "thank you"],
-    "despedida": ["adiós", "chao", "bye", "hasta luego", "nos vemos"],
-    "notificaciones": ["notificaciones", "estado de pedido", "seguimiento", "tracking"],
-    "confirmar": ["confirmar"],
-    "mipago": ["mipago", "mi pago", "comprobante", "pago"],
-    "salir": ["salir", "cerrar", "terminar"]
+    "HUMAN_SUPPORT": """Para consultas muy específicas, por favor escribe al número: 
+👉 https://wa.me/584241220797 👈 
+Un asistente de la tienda responderá tus inquietudes. 📩"""
 }

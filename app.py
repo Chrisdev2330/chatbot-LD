@@ -2,171 +2,120 @@ from flask import Flask, jsonify, request
 from google import genai
 from heyoo import WhatsApp
 import os
-import requests
+import time
 from config import CONFIG
-from templates import *
-from session_manager import SessionManager
-import re
+from templates import TEMPLATES
+from session_manager import get_session, close_session, reset_unrelated_queries
+from static_flows import handle_confirm_flow, handle_payment_flow
+import requests
 
 app = Flask(__name__)
 
 # Configuración de Gemini
 cliente = genai.Client(api_key=CONFIG["GEMINI_API_KEY"])
 
-# Configuración de WhatsApp
-mensajeWa = WhatsApp(CONFIG["WHATSAPP_TOKEN"], CONFIG["WHATSAPP_PHONE_ID"])
-
-# Manejo de sesiones
-session_manager = SessionManager(CONFIG["SESSION_TIMEOUT"])
-
-# Cargar prompt de la IA
-with open('prompt.txt', 'r', encoding='utf-8') as f:
-    PROMPT_IA = f.read()
-
-def enviar(telefonoRecibe, respuesta):
-    mensajeWa.send_message(respuesta, telefonoRecibe)
-
-def enviar_a_admin(mensaje, pedido_id=None):
-    for admin_number in CONFIG["ADMIN_NUMBERS"]:
-        url = f"https://graph.facebook.com/v18.0/{CONFIG['WHATSAPP_PHONE_ID']}/messages"
-        headers = {
-            'Authorization': f'Bearer {CONFIG["WHATSAPP_TOKEN"]}',
-            'Content-Type': 'application/json'
-        }
-        body = {
-            "messaging_product": "whatsapp",
-            "recipient_type": "individual",
-            "to": admin_number,
-            "type": "text",
-            "text": {
-                "preview_url": False,
-                "body": f"Notificación de LD Make Up Bot:\n{mensaje}\n{'ID Pedido: ' + pedido_id if pedido_id else ''}"
-            }
-        }
-        requests.post(url, headers=headers, json=body)
-
-def es_fuera_de_contexto(mensaje):
-    palabras_clave = ["maquillaje", "makeup", "uñas", "pestañas", "ld", "luciana", "díaz", 
-                     "precio", "producto", "compra", "pedido", "envío", "local", "horario",
-                     "pago", "transferencia", "efectivo", "mercadopago", "mayorista", "minorista"]
-    
-    mensaje_lower = mensaje.lower()
-    return not any(palabra in mensaje_lower for palabra in palabras_clave)
-
-def necesita_soporte_humano(mensaje):
-    palabras_soporte = ["soporte", "humano", "representante", "asesor", "hablar con alguien",
-                       "problema", "error", "reclamo", "queja", "no funciona", "incorrecto",
-                       "equivocado", "no es lo que pedí"]
-    
-    mensaje_lower = mensaje.lower()
-    return any(palabra in mensaje_lower for palabra in palabras_soporte)
+# Cargar prompt
+with open('prompts/prompt.txt', 'r', encoding='utf-8') as f:
+    PROMPT_BASE = f.read()
 
 @app.route("/webhook/", methods=["POST", "GET"])
 def webhook_whatsapp():
+    # SI HAY DATOS RECIBIDOS VIA GET
     if request.method == "GET":
         if request.args.get('hub.verify_token') == CONFIG["VERIFY_TOKEN"]:
             return request.args.get('hub.challenge')
-        return "Error de autentificacion."
+        return "Error de autentificación."
     
+    # RECIBIMOS TODOS LOS DATOS ENVIADOS VIA JSON
     data = request.get_json()
     
+    # Verificar si es una notificación de cambio de estado
     try:
         if 'messages' not in data['entry'][0]['changes'][0]['value']:
             return jsonify({"status": "success"}, 200)
     except:
         return jsonify({"status": "error"}, 400)
     
+    # EXTRAEMOS EL NUMERO DE TELEFONO Y EL MENSAJE
     telefonoCliente = data['entry'][0]['changes'][0]['value']['messages'][0]['from']
-    mensaje = data['entry'][0]['changes'][0]['value']['messages'][0]['text']['body']
-    idWA = data['entry'][0]['changes'][0]['value']['messages'][0]['id']
-    timestamp = data['entry'][0]['changes'][0]['value']['messages'][0]['timestamp']
+    mensaje = data['entry'][0]['changes'][0]['value']['messages'][0]['text']['body'].lower()
     
     # Obtener sesión del usuario
-    session = session_manager.get_session(telefonoCliente)
-    session_manager.add_to_history(telefonoCliente, mensaje)
+    session = get_session(telefonoCliente)
     
     # Verificar si es el primer mensaje para enviar bienvenida
-    if any(palabra in mensaje.lower() for palabra in ["hola", "hi", "hello", "buenos días", "buenas tardes", "buenas"]):
-        enviar(telefonoCliente, PLANTILLA_BIENVENIDA)
+    if any(palabra in mensaje for palabra in ["hola", "hi", "hello", "buenos días", "buenas tardes", "buenas"]):
+        enviar(telefonoCliente, TEMPLATES["WELCOME"])
+        reset_unrelated_queries(telefonoCliente)
         return jsonify({"status": "success"}, 200)
     
     # Verificar si es un mensaje de despedida
-    if any(palabra in mensaje.lower() for palabra in FLUJO_CONVERSACION["despedida"]):
-        enviar(telefonoCliente, PLANTILLA_DESPEDIDA)
-        session_manager.close_session(telefonoCliente)
+    if any(palabra in mensaje for palabra in ["adiós", "chao", "bye", "hasta luego", "nos vemos", "salir"]):
+        if "salir" in mensaje:
+            close_session(telefonoCliente)
+        enviar(telefonoCliente, TEMPLATES["GOODBYE"])
         return jsonify({"status": "success"}, 200)
     
-    # Verificar si es para salir/cerrar sesión
-    if any(palabra in mensaje.lower() for palabra in FLUJO_CONVERSACION["salir"]):
-        enviar(telefonoCliente, "✅ Sesión cerrada. ¡Esperamos verte pronto de nuevo en LD Make Up! 💖")
-        session_manager.close_session(telefonoCliente)
+    # Manejar flujos estáticos
+    if "confirmar" in mensaje:
+        handle_confirm_flow(telefonoCliente, mensaje, session)
+        return jsonify({"status": "success"}, 200)
+    
+    if "mipago" in mensaje:
+        handle_payment_flow(telefonoCliente, session)
+        return jsonify({"status": "success"}, 200)
+    
+    # Si está esperando ID de pedido
+    if session.get('state') == 'awaiting_order_id':
+        handle_confirm_flow(telefonoCliente, mensaje, session)
         return jsonify({"status": "success"}, 200)
     
     # Verificar si es un agradecimiento
-    if any(palabra in mensaje.lower() for palabra in FLUJO_CONVERSACION["agradecimiento"]):
+    if any(palabra in mensaje for palabra in ["gracias", "muchas gracias", "thanks", "thank you"]):
         enviar(telefonoCliente, "¡Es un placer ayudarte! 😊 ¿Necesitas algo más?")
+        reset_unrelated_queries(telefonoCliente)
         return jsonify({"status": "success"}, 200)
     
     # Verificar preguntas sobre notificaciones
-    if any(palabra in mensaje.lower() for palabra in FLUJO_CONVERSACION["notificaciones"]):
-        enviar(telefonoCliente, MENSAJE_NOTIFICACIONES)
+    if any(palabra in mensaje for palabra in ["notificaciones", "estado de pedido", "seguimiento", "tracking"]):
+        enviar(telefonoCliente, TEMPLATES["NOTIFICATIONS"])
+        reset_unrelated_queries(telefonoCliente)
         return jsonify({"status": "success"}, 200)
     
-    # Flujo para confirmar pedido
-    if any(palabra in mensaje.lower() for palabra in FLUJO_CONVERSACION["confirmar"]):
-        # Extraer ID del pedido si está en el mensaje
-        pedido_id = re.search(r'confirmar\s+(.+)', mensaje.lower())
-        if pedido_id:
-            pedido_id = pedido_id.group(1).strip().upper()
-            session_manager.update_session(telefonoCliente, {
-                'pedido_confirmado': True,
-                'pedido_id': pedido_id
-            })
-            enviar(telefonoCliente, PLANTILLA_PEDIDO_CONFIRMADO.format(pedido_id=pedido_id))
-            enviar_a_admin(f"El cliente {telefonoCliente} ha confirmado el pedido", pedido_id)
-        else:
-            enviar(telefonoCliente, PLANTILLA_CONFIRMAR_PEDIDO)
-        return jsonify({"status": "success"}, 200)
-    
-    # Flujo para enviar comprobante de pago
-    if any(palabra in mensaje.lower() for palabra in FLUJO_CONVERSACION["mipago"]):
-        if session['data']['pedido_confirmado'] and session['data']['pedido_id']:
-            admin_number = CONFIG["ADMIN_NUMBERS"][0]  # Primer número admin
-            enviar(telefonoCliente, PLANTILLA_ENVIAR_COMPROBANTE.format(admin_number=admin_number))
-            enviar_a_admin(f"El cliente {telefonoCliente} solicita enviar comprobante para el pedido {session['data']['pedido_id']}")
-        else:
-            enviar(telefonoCliente, PLANTILLA_CONFIRMAR_PRIMERO)
-        return jsonify({"status": "success"}, 200)
-    
-    # Verificar si el mensaje está fuera de contexto
-    if es_fuera_de_contexto(mensaje):
-        admin_number = CONFIG["ADMIN_NUMBERS"][0]
-        enviar(telefonoCliente, PLANTILLA_FUERA_CONTEXTO.format(admin_number=admin_number))
-        return jsonify({"status": "success"}, 200)
-    
-    # Verificar si necesita soporte humano
-    if necesita_soporte_humano(mensaje):
-        admin_number = CONFIG["ADMIN_NUMBERS"][0]
-        enviar(telefonoCliente, PLANTILLA_CONTACTO_SOPORTE.format(admin_number=admin_number))
-        return jsonify({"status": "success"}, 200)
-    
-    # Si no es ninguno de los casos anteriores, usar IA
+    # Usar IA para responder
     try:
+        # Construir prompt contextual
+        prompt = f"{PROMPT_BASE}\n\nContexto:\n- Estado sesión: {session['state']}\n- Pedido confirmado: {session.get('confirmed_order', False)}\n\nPregunta: {mensaje}"
+        
         respuesta = cliente.models.generate_content(
             model="gemini-2.0-flash",
-            contents=f"""{PROMPT_IA}
-            
-            Historial reciente del cliente:
-            {session['data']['historial'][-3:] if session['data']['historial'] else 'No hay historial reciente'}
-            
-            Pregunta actual: {mensaje}
-            """
+            contents=prompt
         )
-        enviar(telefonoCliente, respuesta.text)
+        
+        respuesta_texto = respuesta.text
+        
+        # Verificar si la respuesta es relevante
+        if "no está relacionada" in respuesta_texto.lower() or "no tengo información" in respuesta_texto.lower():
+            session['unrelated_queries'] += 1
+            
+            if session['unrelated_queries'] >= 3:
+                enviar(telefonoCliente, TEMPLATES["HUMAN_SUPPORT"])
+                session['unrelated_queries'] = 0
+            else:
+                enviar(telefonoCliente, TEMPLATES["UNRELATED_QUERY"])
+        else:
+            enviar(telefonoCliente, respuesta_texto)
+            reset_unrelated_queries(telefonoCliente)
+            
     except Exception as e:
-        enviar(telefonoCliente, "Disculpas, hubo un error. Por favor contacta al +54 9 3813 02-1066 para asistencia.")
+        print(f"Error con Gemini: {e}")
+        enviar(telefonoCliente, "Disculpa, hubo un error. Por favor intenta nuevamente o contacta al +54 9 3813 02-1066 para asistencia.")
 
     return jsonify({"status": "success"}, 200)
+
+def enviar(telefonoRecibe, respuesta):
+    mensajeWa = WhatsApp(CONFIG["WHATSAPP_TOKEN"], CONFIG["PHONE_NUMBER_ID"])
+    mensajeWa.send_message(respuesta, telefonoRecibe)
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', debug=True)
