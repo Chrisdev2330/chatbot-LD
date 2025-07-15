@@ -1,228 +1,161 @@
 from flask import Flask, jsonify, request
 from google import genai
-from heyoo import WhatsApp
 import os
-import requests
+import time
 from config import CONFIG
 from templates import TEMPLATES
 from session_manager import SessionManager
-import re
+from flows import handle_confirm_flow, handle_payment_flow
+from whatsapp import send_whatsapp_message, send_admin_notification
 
 app = Flask(__name__)
 
-# Configuración inicial
-cliente = genai.Client(api_key=CONFIG["GEMINI_API_KEY"])
-mensajeWa = WhatsApp(CONFIG["WHATSAPP_TOKEN"], CONFIG["WHATSAPP_PHONE_NUMBER_ID"])
+# Initialize services
 session_manager = SessionManager()
+cliente = genai.Client(api_key=CONFIG['GEMINI_API_KEY'])
 
-# Cargar prompt
-with open('prompt.txt', 'r', encoding='utf-8') as file:
-    PROMPT_BASE = file.read()
+# Load AI prompt
+with open('prompt.txt', 'r', encoding='utf-8') as f:
+    AI_PROMPT = f.read()
 
-def enviar(telefonoRecibe, respuesta):
-    """Envía un mensaje a través de WhatsApp"""
-    mensajeWa.send_message(respuesta, telefonoRecibe)
-
-def enviar_a_admin(mensaje, order_id=None, client_number=None):
-    """Envía un mensaje a los números administradores"""
-    for admin_num in CONFIG["ADMIN_NUMBERS"]:
-        try:
-            if order_id and client_number:
-                mensaje = mensaje.format(order_id=order_id, client_number=client_number)
-            elif admin_num in mensaje:
-                mensaje = mensaje.format(admin_number=admin_num)
-            
-            url = f"https://graph.facebook.com/v18.0/{CONFIG['WHATSAPP_PHONE_NUMBER_ID']}/messages"
-            headers = {
-                'Authorization': f'Bearer {CONFIG["WHATSAPP_TOKEN"]}',
-                'Content-Type': 'application/json'
-            }
-            data = {
-                "messaging_product": "whatsapp",
-                "recipient_type": "individual",
-                "to": admin_num,
-                "type": "text",
-                "text": {
-                    "preview_url": False,
-                    "body": mensaje
-                }
-            }
-            requests.post(url, headers=headers, json=data)
-        except Exception as e:
-            print(f"Error enviando a admin {admin_num}: {e}")
-
-def procesar_ia(mensaje_usuario, telefono_cliente):
-    """Procesa el mensaje con la IA de Gemini"""
-    try:
-        # Reiniciar contador si la consulta es relacionada
-        session_manager.reset_unrelated_queries(telefono_cliente)
-        
-        prompt = f"""
-        Eres un asistente virtual profesional de LD Make Up. 
-        Basa tus respuestas únicamente en esta información:
-        
-        {PROMPT_BASE}
-        
-        Instrucciones:
-        - Responde de manera amable, profesional y con emojis moderados
-        - Si la pregunta no está relacionada con la tienda, indica cortésmente que solo puedes ayudar con temas de LD Make Up
-        - Para consultas muy específicas o personales, sugiere contactar al {CONFIG['STORE_PHONE']}
-        - Mantén un tono cercano pero profesional
-        - Si el cliente expresa emociones positivas (ej: "me encanta"), responde con gratitud y ofrece ayuda
-        
-        Pregunta del cliente: {mensaje_usuario}
-        """
-        
-        respuesta = cliente.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt
-        )
-        return respuesta.text
-    except Exception as e:
-        print(f"Error en IA: {e}")
-        return "Disculpa, hubo un error al procesar tu solicitud. Por favor intenta nuevamente."
-
-def manejar_flujo_confirmacion(telefono_cliente, mensaje_usuario, session):
-    """Maneja el flujo de confirmación de pedido"""
-    if mensaje_usuario.upper() == "NO":
-        enviar(telefono_cliente, TEMPLATES["ORDER_NOT_CONFIRMED"])
-        if session['order_id']:
-            enviar_a_admin(TEMPLATES["ORDER_NOT_CONFIRMED_ADMIN"], 
-                          session['order_id'], telefono_cliente)
-        session_manager.update_session_state(telefono_cliente, "IDLE")
-        return True
-    
-    elif mensaje_usuario.upper() == "SALIR":
-        enviar(telefono_cliente, "Has salido del proceso de confirmación.")
-        session_manager.update_session_state(telefono_cliente, "IDLE")
-        return True
-    
-    elif re.match(r'^#\w+', mensaje_usuario):
-        order_id = mensaje_usuario[1:].strip()
-        session_manager.confirm_order(telefono_cliente, order_id)
-        enviar(telefono_cliente, TEMPLATES["ORDER_CONFIRMED"])
-        enviar_a_admin(TEMPLATES["ORDER_CONFIRMED_ADMIN"], order_id, telefono_cliente)
-        return True
-    
-    elif session['state'] == 'CONFIRMING':
-        enviar(telefono_cliente, TEMPLATES["CONFIRM_PROMPT"])
-        return True
-    
-    return False
-
-def manejar_flujo_pago(telefono_cliente, mensaje_usuario, session):
-    """Maneja el flujo de envío de comprobante de pago"""
-    if not session.get('confirmed', False):
-        enviar(telefono_cliente, TEMPLATES["NEED_CONFIRM_FIRST"])
-        session_manager.update_session_state(telefono_cliente, "IDLE")
-        return True
-    
-    if mensaje_usuario.upper() == "CANCELAR":
-        enviar(telefono_cliente, TEMPLATES["ORDER_CANCELLED"])
-        if session['order_id']:
-            enviar_a_admin(TEMPLATES["PAYMENT_CANCELLED_ADMIN"], 
-                          session['order_id'], telefono_cliente)
-        session_manager.update_session_state(telefono_cliente, "IDLE")
-        return True
-    
-    elif mensaje_usuario.upper() == "SALIR":
-        enviar(telefono_cliente, "Has salido del proceso de pago.")
-        session_manager.update_session_state(telefono_cliente, "IDLE")
-        return True
-    
-    elif session['state'] == 'PAYING':
-        enviar(telefono_cliente, TEMPLATES["PAYMENT_PROMPT"].format(
-            admin_number=CONFIG["ADMIN_NUMBERS"][0]))
-        if session['order_id']:
-            enviar(telefono_cliente, TEMPLATES["PAYMENT_INSTRUCTIONS"].format(
-                order_id=session['order_id']))
-        return True
-    
-    return False
+# Conversation flows
+FLUJO_CONVERSACION = {
+    "agradecimiento": ["gracias", "muchas gracias", "thanks", "thank you"],
+    "despedida": ["adiós", "chao", "bye", "hasta luego", "nos vemos"],
+    "notificaciones": ["notificaciones", "estado de pedido", "seguimiento", "tracking"]
+}
 
 @app.route("/webhook/", methods=["POST", "GET"])
 def webhook_whatsapp():
+    # Handle verification
     if request.method == "GET":
         if request.args.get('hub.verify_token') == "HolaNovato":
             return request.args.get('hub.challenge')
-        return "Error de autentificación."
+        return "Error de autentificacion."
     
+    # Handle incoming messages
     data = request.get_json()
     
+    # Skip status notifications
     try:
-        # Ignorar notificaciones de estado
         if 'messages' not in data['entry'][0]['changes'][0]['value']:
             return jsonify({"status": "success"}), 200
-        
-        # Extraer datos del mensaje
-        telefono_cliente = data['entry'][0]['changes'][0]['value']['messages'][0]['from']
-        mensaje_usuario = data['entry'][0]['changes'][0]['value']['messages'][0]['text']['body']
-        timestamp = data['entry'][0]['changes'][0]['value']['messages'][0]['timestamp']
-        
-        # Obtener sesión del usuario
-        session = session_manager.get_session(telefono_cliente)
-        
-        # Manejar saludo inicial
-        if any(palabra in mensaje_usuario.lower() for palabra in ["hola", "hi", "hello", "buenos días", "buenas tardes", "buenas"]):
-            enviar(telefono_cliente, TEMPLATES["WELCOME"])
-            return jsonify({"status": "success"}), 200
-        
-        # Manejar despedida
-        if any(palabra in mensaje_usuario.lower() for palabra in ["adiós", "chao", "bye", "hasta luego", "nos vemos"]):
-            enviar(telefono_cliente, TEMPLATES["GOODBYE"].format(
-                store_address=CONFIG["STORE_ADDRESS"],
-                store_hours=CONFIG["STORE_HOURS"]
-            ))
-            return jsonify({"status": "success"}), 200
-        
-        # Manejar salir (cerrar sesión)
-        if mensaje_usuario.upper() == "SALIR":
-            session_manager.close_session(telefono_cliente)
-            enviar(telefono_cliente, TEMPLATES["SESSION_CLOSED"])
-            return jsonify({"status": "success"}), 200
-        
-        # Manejar confirmación de pedido
-        if mensaje_usuario.upper() == "CONFIRMAR":
-            session_manager.update_session_state(telefono_cliente, "CONFIRMING")
-            enviar(telefono_cliente, TEMPLATES["CONFIRM_PROMPT"])
-            return jsonify({"status": "success"}), 200
-        
-        # Manejar envío de comprobante
-        if mensaje_usuario.upper() == "MIPAGO":
-            session_manager.update_session_state(telefono_cliente, "PAYING")
-            enviar(telefono_cliente, TEMPLATES["PAYMENT_PROMPT"].format(
-                admin_number=CONFIG["ADMIN_NUMBERS"][0]))
-            if session.get('order_id'):
-                enviar(telefono_cliente, TEMPLATES["PAYMENT_INSTRUCTIONS"].format(
-                    order_id=session['order_id']))
-            return jsonify({"status": "success"}), 200
-        
-        # Manejar flujos de confirmación y pago
-        if manejar_flujo_confirmacion(telefono_cliente, mensaje_usuario, session):
-            return jsonify({"status": "success"}), 200
-        
-        if manejar_flujo_pago(telefono_cliente, mensaje_usuario, session):
-            return jsonify({"status": "success"}), 200
-        
-        # Manejar consultas no relacionadas
-        unrelated_count = session_manager.increment_unrelated_queries(telefono_cliente)
-        if unrelated_count >= 3:
-            enviar(telefono_cliente, TEMPLATES["CONTACT_HUMAN"].format(
-                store_phone=CONFIG["STORE_PHONE"]))
-            return jsonify({"status": "success"}), 200
-        elif unrelated_count > 1:
-            enviar(telefono_cliente, TEMPLATES["UNRELATED_QUERY"])
-            return jsonify({"status": "success"}), 200
-        
-        # Procesar con IA
-        respuesta_ia = procesar_ia(mensaje_usuario, telefono_cliente)
-        enviar(telefono_cliente, respuesta_ia)
-        
+    except:
+        return jsonify({"status": "error"}, 400)
+    
+    # Extract message data
+    telefonoCliente = data['entry'][0]['changes'][0]['value']['messages'][0]['from']
+    mensaje = data['entry'][0]['changes'][0]['value']['messages'][0]['text']['body']
+    
+    # Get or create session
+    session = session_manager.get_session(telefonoCliente)
+    session_manager.update_session(telefonoCliente)
+    
+    # Check if in any flow
+    current_flow = session_manager.get_current_flow(telefonoCliente)
+    if current_flow:
+        if current_flow['flow_type'] == 'confirmar':
+            return handle_confirm_flow(telefonoCliente, mensaje)
+        elif current_flow['flow_type'] == 'mipago':
+            return handle_payment_flow(telefonoCliente, mensaje)
+    
+    # Handle static flows
+    if mensaje.lower() == 'confirmar':
+        session_manager.start_flow(telefonoCliente, 'confirmar')
+        send_whatsapp_message(telefonoCliente, TEMPLATES['confirm_prompt'])
         return jsonify({"status": "success"}), 200
     
+    elif mensaje.lower() == 'mipago':
+        if session_manager.get_confirmed_order(telefonoCliente):
+            session_manager.start_flow(telefonoCliente, 'mipago')
+            send_whatsapp_message(telefonoCliente, TEMPLATES['payment_prompt'].format(
+                admin_number=CONFIG['ADMIN_NUMBERS'][0]
+            ))
+        else:
+            send_whatsapp_message(telefonoCliente, TEMPLATES['missing_confirmation'])
+        return jsonify({"status": "success"}), 200
+    
+    elif mensaje.lower() == 'salir':
+        confirmed_order = session_manager.clear_session(telefonoCliente)
+        if confirmed_order:
+            # Notify admin about session close with pending order
+            admin_message = f"⚠️ El cliente {telefonoCliente} cerró sesión con pedido pendiente:\nID: {confirmed_order}"
+            send_admin_notification(admin_message)
+        send_whatsapp_message(telefonoCliente, TEMPLATES['goodbye'])
+        return jsonify({"status": "success"}), 200
+    
+    # Handle greetings
+    if any(palabra in mensaje.lower() for palabra in ["hola", "hi", "hello", "buenos días", "buenas tardes", "buenas"]):
+        send_whatsapp_message(telefonoCliente, TEMPLATES['welcome'])
+        return jsonify({"status": "success"}), 200
+    
+    # Handle thanks
+    if any(palabra in mensaje.lower() for palabra in FLUJO_CONVERSACION["agradecimiento"]):
+        send_whatsapp_message(telefonoCliente, "¡Es un placer ayudarte! 😊 ¿Necesitas algo más?")
+        return jsonify({"status": "success"}), 200
+    
+    # Handle goodbye
+    if any(palabra in mensaje.lower() for palabra in FLUJO_CONVERSACION["despedida"]):
+        send_whatsapp_message(telefonoCliente, TEMPLATES['goodbye'])
+        return jsonify({"status": "success"}), 200
+    
+    # Handle notifications
+    if any(palabra in mensaje.lower() for palabra in FLUJO_CONVERSACION["notificaciones"]):
+        send_whatsapp_message(telefonoCliente, TEMPLATES['notifications'])
+        return jsonify({"status": "success"}), 200
+    
+    # Check for unrelated messages
+    if session['unrelated_attempts'] >= CONFIG['MAX_UNRELATED_ATTEMPTS']:
+        send_whatsapp_message(telefonoCliente, TEMPLATES['human_assistance'].format(
+            admin_number=CONFIG['ADMIN_NUMBERS'][0]
+        ))
+        return jsonify({"status": "success"}), 200
+    
+    # Use AI for response
+    try:
+        # Check if message seems unrelated
+        response = cliente.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=f"""
+            Eres un asistente de LD Make Up. Analiza si esta pregunta está relacionada con maquillaje, belleza o la tienda:
+            Pregunta: {mensaje}
+            
+            Responde SOLO con 'si' o 'no'. No agregues explicaciones.
+            """
+        )
+        
+        if response.text.lower().strip() == 'no':
+            session_manager.increment_unrelated_attempts(telefonoCliente)
+            if session['unrelated_attempts'] < CONFIG['MAX_UNRELATED_ATTEMPTS']:
+                send_whatsapp_message(telefonoCliente, TEMPLATES['unrelated_message'])
+            else:
+                send_whatsapp_message(telefonoCliente, TEMPLATES['human_assistance'].format(
+                    admin_number=CONFIG['ADMIN_NUMBERS'][0]
+                ))
+            return jsonify({"status": "success"}), 200
+        
+        # If related, generate full response
+        response = cliente.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=f"""
+            {AI_PROMPT}
+            
+            Instrucciones:
+            1. Responde de manera profesional pero amigable
+            2. Usa emojis relevantes pero con moderación
+            3. Si la pregunta no está en el prompt pero puedes inferirla, responde basado en la información disponible
+            4. Mantén respuestas concisas pero completas
+            
+            Pregunta: {mensaje}
+            """
+        )
+        send_whatsapp_message(telefonoCliente, response.text)
+        session_manager.reset_unrelated_attempts(telefonoCliente)
+        
     except Exception as e:
-        print(f"Error general: {e}")
-        return jsonify({"status": "error"}), 400
+        send_whatsapp_message(telefonoCliente, "Disculpas, hubo un error. Por favor contacta al +54 9 3813 02-1066 para asistencia.")
+    
+    return jsonify({"status": "success"}), 200
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', debug=True)
