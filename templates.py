@@ -1,9 +1,12 @@
-# Plantillas de mensajes para el bot
-from config import CONFIG
+# Mensajes de flujo de conversación
+FLUJO_CONVERSACION = {
+    "agradecimiento": ["gracias", "muchas gracias", "thanks", "thank you"],
+    "despedida": ["adiós", "chao", "bye", "hasta luego", "nos vemos", "salir"],
+    "notificaciones": ["notificaciones", "estado de pedido", "seguimiento", "tracking"]
+}
 
-ADMIN_NUMBER = CONFIG["ADMIN_NUMBERS"][0]
-
-PLANTILLA_BIENVENIDA = f"""¡Hola! 💄 Soy tu asistente virtual de *LD Make Up*.
+# Plantilla de bienvenida
+PLANTILLA_BIENVENIDA = """¡Hola! 💄 Soy tu asistente virtual de *LD Make Up*.
 
 Estoy aquí para ayudarte con:
 - Consultas sobre productos y precios
@@ -11,11 +14,13 @@ Estoy aquí para ayudarte con:
 - Horarios y dirección de nuestro local
 - Asesoramiento profesional
 
-*Importante:* Todas las notificaciones sobre el estado de tu pedido llegarán a este mismo chat. 📦🔔
+*Importante:*
+- Todas las notificaciones sobre tu pedido llegarán aquí 📦🔔
+- Para *confirmar un pedido* escribe *CONFIRMAR*
+- Para enviar comprobante escribe *MIPAGO*
 
-*Para confirmar un pedido* escribe *CONFIRMAR*
-*Para enviar comprobante de pago* escribe *MIPAGO*
-*Para salir* escribe *SALIR*
+📍 *Dirección:* Alsina 455, San Miguel de Tucumán
+⏰ *Horario:* Lunes a Sábados 09:00-13:00 y 17:00-21:00
 
 ¿En qué puedo ayudarte hoy?"""
 
@@ -32,55 +37,95 @@ Para cualquier otra consulta, ¡no dudes en escribirnos!
 MENSAJE_NOTIFICACIONES = """ℹ️ *Recordatorio importante:*
 Todas las notificaciones sobre el estado de tu pedido (confirmación, envío, etc.) llegarán a este mismo chat. No es necesario que respondas a estos mensajes automáticos. 📦🔔"""
 
-FLUJO_CONFIRMAR = """📝 *Confirmación de Pedido*
+# Plantillas para flujo de confirmación
+PLANTILLA_CONFIRMAR_PEDIDO = """📝 *Confirmación de Pedido*
+
 Por favor, escribe el ID de tu pedido en el siguiente formato:
 #ID (ejemplo: #12345abc)
 
-Escribe *CANCELAR* para cancelar el proceso
-Escribe *REGRESAR* para volver al menú principal"""
+Opciones:
+- *CANCELAR*: Para cancelar este proceso
+- *REGRESAR*: Para volver al menú principal"""
 
-FLUJO_MIPAGO = f"""💳 *Envío de Comprobante*
-Por favor, envía tu comprobante de pago al número:
-{ADMIN_NUMBER}
+PLANTILLA_PEDIDO_CONFIRMADO_CLIENTE = """✅ *¡Pedido Confirmado!*
 
-Incluye el ID de tu pedido en el mensaje.
+Tu pedido con ID *#{}* ha sido confirmado con éxito. 
 
-Escribe *CANCELAR* para cancelar el proceso
-Escribe *REGRESAR* para volver al menú principal"""
+Ahora puedes enviar tu comprobante de pago escribiendo *MIPAGO*.
 
-PLANTILLA_CONFIRMACION_ADMIN = lambda id_pedido: f"""📦 *Nueva Confirmación de Pedido*
-El cliente ha confirmado el pedido con ID: {id_pedido}"""
+Gracias por tu compra en LD Make Up! 💄💖"""
 
-PLANTILLA_CONFIRMACION_CLIENTE = lambda id_pedido: f"""✅ *Pedido Confirmado*
-Hemos recibido la confirmación de tu pedido con ID: {id_pedido}
+PLANTILLA_PEDIDO_CONFIRMADO_ADMIN = """📢 *Nueva Confirmación de Pedido*
 
-Ahora puedes enviar tu comprobante de pago escribiendo *MIPAGO*"""
+El cliente ha confirmado el pedido con ID: *#{}*
 
-PLANTILLA_CANCELACION_ADMIN = lambda id_pedido: f"""❌ *Pedido Cancelado*
-El cliente ha cancelado el pedido con ID: {id_pedido}"""
+Por favor, procede con el procesamiento del mismo."""
 
-PLANTILLA_CANCELACION_CLIENTE = """🚫 *Proceso Cancelado*
-Has cancelado la operación actual. ¿En qué más puedo ayudarte?"""
+PLANTILLA_CONFIRMAR_PRIMERO = """⚠️ *Primero debes confirmar tu pedido*
 
+Para enviar tu comprobante de pago, primero debes confirmar tu pedido escribiendo *CONFIRMAR*.
+
+Si necesitas ayuda, no dudes en preguntar."""
+
+# Plantillas para flujo de pago
+PLANTILLA_ENVIAR_COMPROBANTE = """💳 *Enviar Comprobante de Pago*
+
+Por favor, escribe el ID de tu pedido en el siguiente formato:
+#ID (ejemplo: #12345abc)
+
+Luego envía tu comprobante de pago al número:
+👉 +584241220797
+
+Opciones:
+- *CANCELAR*: Para cancelar este proceso"""
+
+PLANTILLA_COMPROBANTE_RECIBIDO_CLIENTE = """✅ *¡Comprobante Recibido!*
+
+Hemos registrado tu comprobante para el pedido *#{}*. 
+
+Nuestro equipo verificará el pago y te notificará cuando tu pedido sea despachado.
+
+¡Gracias por confiar en LD Make Up! 💖"""
+
+PLANTILLA_COMPROBANTE_RECIBIDO_ADMIN = """📢 *Nuevo Comprobante Recibido*
+
+El cliente ha enviado comprobante para el pedido con ID: *#{}*
+
+Por favor, verifica el pago y procede con el despacho."""
+
+# Plantillas para cancelación
+PLANTILLA_CANCELAR_PEDIDO_CLIENTE = """❌ *Pedido Cancelado*
+
+Has cancelado el proceso de confirmación de pedido. 
+
+Si fue un error, puedes iniciar nuevamente escribiendo *CONFIRMAR*."""
+
+PLANTILLA_CANCELAR_PEDIDO_ADMIN = """❌ *Pedido Cancelado*
+
+El cliente ha cancelado el pedido con ID: *#{}*"""
+
+PLANTILLA_CANCELAR_PAGO_CLIENTE = """❌ *Proceso de Pago Cancelado*
+
+Has cancelado el envío del comprobante de pago. 
+
+Si fue un error, puedes iniciar nuevamente escribiendo *MIPAGO*."""
+
+PLANTILLA_CANCELAR_PAGO_ADMIN = """❌ *Pago Cancelado*
+
+El cliente ha cancelado el envío de comprobante para el pedido con ID: *#{}*"""
+
+# Plantilla para formato incorrecto
 PLANTILLA_FORMATO_INCORRECTO = """⚠️ *Formato Incorrecto*
-Por favor, asegúrate de escribir el ID en el formato solicitado.
 
-Ejemplo válido: #12345abc"""
+Por favor, escribe el ID de tu pedido comenzando con # o - seguido del número de ID (ejemplo: #12345abc o -12345abc)
 
-PLANTILLA_NO_CONFIRMADO = """🔴 *Acción no disponible*
-Primero debes confirmar tu pedido escribiendo *CONFIRMAR*"""
+O escribe *CANCELAR* para terminar este proceso."""
 
-PLANTILLA_FUERA_CONTEXTO = """Parece que tu consulta no está relacionada con LD Make Up. ¿En qué puedo ayudarte sobre maquillaje o productos de belleza? 💄"""
+# Plantilla para contacto humano
+PLANTILLA_CONTACTO_HUMANO = """👩💼 *Asistencia Personalizada*
 
-PLANTILLA_CONTACTO_HUMANO = f"""📩 *Asistencia Personalizada*
-Para consultas muy específicas, escribe a {ADMIN_NUMBER}. Un asistente te ayudará personalmente."""
+Parece que necesitas ayuda más específica. Por favor, escribe directamente a nuestro asistente humano:
 
-FLUJO_CONVERSACION = {
-    "agradecimiento": ["gracias", "muchas gracias", "thanks", "thank you", "agradecido", "agradecida"],
-    "despedida": ["adiós", "chao", "bye", "hasta luego", "nos vemos", "hasta pronto"],
-    "notificaciones": ["notificaciones", "estado de pedido", "seguimiento", "tracking", "rastreo"],
-    "confirmar": ["confirmar", "confirmacion", "confirmación", "confirmar pedido"],
-    "mipago": ["mipago", "pago", "comprobante", "voucher", "transferencia"],
-    "salir": ["salir", "cerrar sesion", "cerrar sesión", "logout"],
-    "cancelar": ["cancelar", "cancelar pedido", "anular"]
-}
+👉 +584241220797
+
+Te atenderemos con gusto. 💖"""

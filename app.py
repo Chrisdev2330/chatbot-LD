@@ -1,113 +1,193 @@
 from flask import Flask, jsonify, request
-from google import genai
+from openai import OpenAI
 from heyoo import WhatsApp
-from config import CONFIG
-from templates import *
-from session_manager import session_manager
-from flows import handle_flows
 import os
+import requests
+from datetime import datetime, timedelta
+from session_manager import SessionManager
+from templates import *
+import config
 
 app = Flask(__name__)
 
-# Configuración de Gemini
-cliente = genai.Client(api_key=CONFIG["GEMINI_API_KEY"])
+# Configuración de DeepSeek
+client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=config.DEEPSEEK_API_KEY,
+)
 
-# Cargar prompt
-with open('prompt.txt', 'r', encoding='utf-8') as file:
-    PROMPT_BASE = file.read()
+# Configuración de WhatsApp
+mensajeWa = WhatsApp(config.WHATSAPP_TOKEN, config.WHATSAPP_PHONE_ID)
+
+# Manejo de sesiones
+session_manager = SessionManager()
 
 @app.route("/webhook/", methods=["POST", "GET"])
 def webhook_whatsapp():
-    # SI HAY DATOS RECIBIDOS VIA GET
     if request.method == "GET":
-        if request.args.get('hub.verify_token') == CONFIG["VERIFY_TOKEN"]:
+        if request.args.get('hub.verify_token') == config.VERIFY_TOKEN:
             return request.args.get('hub.challenge')
-        else:
-            return "Error de autentificacion."
+        return "Error de autentificacion."
     
-    # RECIBIMOS TODOS LOS DATOS ENVIADO VIA JSON
     data = request.get_json()
     
-    # Verificar si es una notificación de cambio de estado (no mensaje de usuario)
     try:
         if 'messages' not in data['entry'][0]['changes'][0]['value']:
             return jsonify({"status": "success"}, 200)
     except:
         return jsonify({"status": "error"}, 400)
     
-    # EXTRAEMOS EL NUMERO DE TELEFONO Y EL MENSAJE
     telefonoCliente = data['entry'][0]['changes'][0]['value']['messages'][0]['from']
     mensaje = data['entry'][0]['changes'][0]['value']['messages'][0]['text']['body']
     
-    # Manejar flujos estáticos primero
-    flow_response = handle_flows(telefonoCliente, mensaje)
-    if flow_response:
-        return flow_response
-    
-    # Obtener sesión del usuario
+    # Obtener o crear sesión
     session = session_manager.get_session(telefonoCliente)
     
-    # Verificar si es el primer mensaje para enviar bienvenida
-    if any(palabra in mensaje.lower() for palabra in ["hola", "hi", "hello", "buenos días", "buenas tardes", "buenas"]):
-        enviar(telefonoCliente, PLANTILLA_BIENVENIDA)
+    # Manejar flujos especiales
+    if handle_special_flows(telefonoCliente, mensaje, session):
         return jsonify({"status": "success"}, 200)
     
-    # Verificar si es un mensaje de despedida
-    if any(palabra in mensaje.lower() for palabra in FLUJO_CONVERSACION["despedida"]):
-        enviar(telefonoCliente, PLANTILLA_DESPEDIDA)
-        session_manager.reset_session(telefonoCliente)
-        return jsonify({"status": "success"}, 200)
-    
-    # Verificar si es un agradecimiento
-    if any(palabra in mensaje.lower() for palabra in FLUJO_CONVERSACION["agradecimiento"]):
-        enviar(telefonoCliente, "¡Es un placer ayudarte! 😊 ¿Necesitas algo más?")
-        return jsonify({"status": "success"}, 200)
-    
-    # Verificar preguntas sobre notificaciones
-    if any(palabra in mensaje.lower() for palabra in FLUJO_CONVERSACION["notificaciones"]):
-        enviar(telefonoCliente, MENSAJE_NOTIFICACIONES)
-        return jsonify({"status": "success"}, 200)
-    
-    # Manejar consultas con IA
-    try:
-        respuesta = cliente.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=f"""{PROMPT_BASE}
-            
-            Contexto adicional:
-            - Estado actual del cliente: {session['state']}
-            - Pedido confirmado: {'Sí' if session.get('confirmed_order') else 'No'}
-            
-            Pregunta del cliente: {mensaje}
-            
-            Instrucciones:
-            1. Responde de manera profesional pero cálida
-            2. Usa emojis relevantes (máximo 2 por mensaje)
-            3. Si la pregunta no está relacionada con LD Make Up, sugiere amablemente temas relacionados
-            4. Para consultas muy personales o complejas, recomienda contactar al número de atención
-            """
-        )
-        
-        # Verificar si la respuesta está fuera de contexto
-        if "no está relacionada" in respuesta.text.lower() or "no tengo información" in respuesta.text.lower():
-            session_manager.increment_attempts(telefonoCliente)
-            if session_manager.get_session(telefonoCliente)['attempts'] >= 3:
-                enviar(telefonoCliente, PLANTILLA_CONTACTO_HUMANO)
-                session_manager.reset_attempts(telefonoCliente)
-            else:
-                enviar(telefonoCliente, PLANTILLA_FUERA_CONTEXTO)
-        else:
-            session_manager.reset_attempts(telefonoCliente)
-            enviar(telefonoCliente, respuesta.text)
-    except Exception as e:
-        print(f"Error con Gemini: {e}")
-        enviar(telefonoCliente, "Disculpas, hubo un error procesando tu solicitud. Por favor intenta nuevamente.")
+    # Manejar mensajes normales
+    handle_normal_message(telefonoCliente, mensaje, session)
     
     return jsonify({"status": "success"}, 200)
 
+def handle_special_flows(telefonoCliente, mensaje, session):
+    mensaje = mensaje.lower().strip()
+    
+    # Saludo inicial
+    if any(palabra in mensaje for palabra in ["hola", "hi", "hello", "buenos días", "buenas tardes", "buenas"]):
+        enviar(telefonoCliente, PLANTILLA_BIENVENIDA)
+        return True
+    
+    # Despedida
+    if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["despedida"]):
+        enviar(telefonoCliente, PLANTILLA_DESPEDIDA)
+        session_manager.clear_session(telefonoCliente)
+        return True
+    
+    # Agradecimiento
+    if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["agradecimiento"]):
+        enviar(telefonoCliente, "¡Es un placer ayudarte! 😊 ¿Necesitas algo más?")
+        return True
+    
+    # Notificaciones
+    if any(palabra in mensaje for palabra in FLUJO_CONVERSACION["notificaciones"]):
+        enviar(telefonoCliente, MENSAJE_NOTIFICACIONES)
+        return True
+    
+    # Flujo confirmar pedido
+    if mensaje == "confirmar":
+        session['current_flow'] = 'confirmar'
+        enviar(telefonoCliente, PLANTILLA_CONFIRMAR_PEDIDO)
+        return True
+    
+    # Flujo mi pago
+    if mensaje == "mipago":
+        if 'confirmed_order' not in session:
+            enviar(telefonoCliente, PLANTILLA_CONFIRMAR_PRIMERO)
+            return True
+        session['current_flow'] = 'mipago'
+        enviar(telefonoCliente, PLANTILLA_ENVIAR_COMPROBANTE)
+        return True
+    
+    # Manejar respuestas dentro de flujos
+    if 'current_flow' in session:
+        return handle_flow_response(telefonoCliente, mensaje, session)
+    
+    return False
+
+def handle_flow_response(telefonoCliente, mensaje, session):
+    current_flow = session['current_flow']
+    
+    if current_flow == 'confirmar':
+        if mensaje.lower() == 'regresar':
+            session.pop('current_flow', None)
+            enviar(telefonoCliente, "Has salido del flujo de confirmación. ¿En qué más puedo ayudarte?")
+            return True
+        
+        if mensaje.lower() == 'cancelar':
+            session.pop('current_flow', None)
+            enviar(telefonoCliente, PLANTILLA_CANCELAR_PEDIDO_CLIENTE)
+            enviar_admin(PLANTILLA_CANCELAR_PEDIDO_ADMIN.format(order_id=session.get('order_id', 'N/A')))
+            session_manager.clear_session(telefonoCliente)
+            return True
+        
+        if mensaje.startswith('#') or mensaje.startswith('-'):
+            order_id = mensaje[1:].strip()
+            session['confirmed_order'] = True
+            session['order_id'] = order_id
+            session.pop('current_flow', None)
+            enviar(telefonoCliente, PLANTILLA_PEDIDO_CONFIRMADO_CLIENTE.format(order_id=order_id))
+            enviar_admin(PLANTILLA_PEDIDO_CONFIRMADO_ADMIN.format(order_id=order_id))
+            return True
+        else:
+            enviar(telefonoCliente, PLANTILLA_FORMATO_INCORRECTO)
+            return True
+    
+    elif current_flow == 'mipago':
+        if mensaje.lower() == 'cancelar':
+            session.pop('current_flow', None)
+            enviar(telefonoCliente, PLANTILLA_CANCELAR_PAGO_CLIENTE)
+            enviar_admin(PLANTILLA_CANCELAR_PAGO_ADMIN.format(order_id=session.get('order_id', 'N/A')))
+            session_manager.clear_session(telefonoCliente)
+            return True
+        
+        if mensaje.startswith('#') or mensaje.startswith('-'):
+            order_id = mensaje[1:].strip()
+            session.pop('current_flow', None)
+            enviar(telefonoCliente, PLANTILLA_COMPROBANTE_RECIBIDO_CLIENTE.format(order_id=order_id))
+            enviar_admin(PLANTILLA_COMPROBANTE_RECIBIDO_ADMIN.format(order_id=order_id))
+            session_manager.clear_session(telefonoCliente)
+            return True
+        else:
+            enviar(telefonoCliente, PLANTILLA_FORMATO_INCORRECTO)
+            return True
+    
+    return False
+
+def handle_normal_message(telefonoCliente, mensaje, session):
+    # Contador de mensajes no relacionados
+    if 'unrelated_count' not in session:
+        session['unrelated_count'] = 0
+    
+    # Obtener respuesta de la IA
+    try:
+        with open('prompt.txt', 'r') as file:
+            prompt_base = file.read()
+        
+        completion = client.chat.completions.create(
+            model="deepseek/deepseek-r1-0528-qwen3-8b:free",
+            messages=[
+                {"role": "system", "content": prompt_base},
+                {"role": "user", "content": mensaje}
+            ]
+        )
+        respuesta = completion.choices[0].message.content
+        
+        # Verificar si la respuesta es relevante
+        if "no está relacionada" in respuesta or "no tengo información" in respuesta:
+            session['unrelated_count'] += 1
+        else:
+            session['unrelated_count'] = 0
+        
+        # Manejar múltiples mensajes no relacionados
+        if session['unrelated_count'] >= 3:
+            enviar(telefonoCliente, PLANTILLA_CONTACTO_HUMANO)
+            session['unrelated_count'] = 0
+        else:
+            enviar(telefonoCliente, respuesta)
+            
+    except Exception as e:
+        print(f"Error al obtener respuesta de IA: {e}")
+        enviar(telefonoCliente, "Disculpas, hubo un error. Por favor intenta nuevamente.")
+
 def enviar(telefonoRecibe, respuesta):
-    mensajeWa = WhatsApp(CONFIG["WHATSAPP_TOKEN"], CONFIG["WHATSAPP_NUMBER_ID"])
     mensajeWa.send_message(respuesta, telefonoRecibe)
+
+def enviar_admin(mensaje):
+    for admin in config.ADMIN_NUMBERS:
+        mensajeWa.send_message(mensaje, admin)
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', debug=True)

@@ -11,3 +11,4 @@ python-dateutil
 requests
 certifi
 PyYAML
+openai
