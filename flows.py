@@ -1,115 +1,71 @@
-from flask import jsonify
-from config import CONFIG
-from templates import TEMPLATES
+from templates import Templates
+from utils import send_message, send_admin_notification
 from session_manager import session_manager
-from whatsapp import send_whatsapp_message, send_admin_notification
 
-def handle_confirm_flow(phone, message):
-    flow = session_manager.get_current_flow(phone)
-    
-    # Check if flow timed out
-    if not session_manager.is_flow_active(phone):
-        session_manager.end_flow(phone)
-        return jsonify({"status": "success"}), 200
-    
-    # Check if message starts with # (confirmation) or - (cancellation)
-    if message.startswith('#'):
-        order_id = message[1:].strip()
-        if order_id:
-            # Successful confirmation
-            session_manager.set_confirmed_order(phone, order_id)
-            send_whatsapp_message(phone, TEMPLATES['confirm_success'].format(order_id=order_id))
-            
-            # Notify admin
-            admin_message = TEMPLATES['confirm_admin_notification'].format(
-                client_number=phone,
-                order_id=order_id
-            )
-            send_admin_notification(admin_message)
-            
-            session_manager.end_flow(phone)
-            return jsonify({"status": "success"}), 200
-        else:
-            # Empty order ID
-            send_whatsapp_message(phone, TEMPLATES['invalid_format'].format(
-                format_instructions="`#ID_de_tu_pedido` (ejemplo: `#AB1234`)"
+class Flows:
+    @staticmethod
+    def handle_confirm(user_id, user_number, message):
+        session = session_manager.get_session(user_id)
+        
+        if message.lower() == 'cancelar':
+            session_manager.clear_current_flow(user_id)
+            send_message(user_number, Templates.cancel_action("confirmación"))
+            send_admin_notification(Templates.cancel_admin_notification(
+                session.get('confirmed_order', 'N/A'), 
+                user_number, 
+                "confirmación"
             ))
-            return jsonify({"status": "success"}), 200
-    
-    elif message.startswith('-'):
+            return True
+        
+        if not message.startswith('#'):
+            send_message(user_number, Templates.invalid_format())
+            return False
+        
         order_id = message[1:].strip()
-        if order_id:
-            # Cancellation
-            send_whatsapp_message(phone, TEMPLATES['cancel_success'].format(order_id=order_id))
-            
-            # Notify admin
-            admin_message = TEMPLATES['cancel_admin_notification'].format(
-                client_number=phone,
-                order_id=order_id
-            )
-            send_admin_notification(admin_message)
-            
-            session_manager.end_flow(phone)
-            return jsonify({"status": "success"}), 200
-        else:
-            # Empty order ID
-            send_whatsapp_message(phone, TEMPLATES['invalid_format'].format(
-                format_instructions="`-ID_de_tu_pedido` (ejemplo: `-AB1234`)"
-            ))
-            return jsonify({"status": "success"}), 200
-    
-    else:
-        # Invalid format
-        send_whatsapp_message(phone, TEMPLATES['invalid_format'].format(
-            format_instructions="Para confirmar: `#ID_de_tu_pedido`\nPara cancelar: `-ID_de_tu_pedido`"
+        if not order_id:
+            send_message(user_number, Templates.invalid_format())
+            return False
+        
+        # Confirmación exitosa
+        session_manager.set_confirmed_order(user_id, order_id)
+        session_manager.clear_current_flow(user_id)
+        
+        send_message(user_number, Templates.confirm_success(order_id))
+        send_admin_notification(Templates.confirm_admin_notification(
+            order_id, 
+            user_number
         ))
-        return jsonify({"status": "success"}), 200
+        return True
 
-def handle_payment_flow(phone, message):
-    flow = session_manager.get_current_flow(phone)
-    
-    # Check if flow timed out
-    if not session_manager.is_flow_active(phone):
-        session_manager.end_flow(phone)
-        send_whatsapp_message(phone, TEMPLATES['flow_timeout'])
-        return jsonify({"status": "success"}), 200
-    
-    # Check if user wants to cancel
-    if message.lower() == 'cancelar':
-        order_id = session_manager.get_confirmed_order(phone)
-        if order_id:
-            send_whatsapp_message(phone, TEMPLATES['cancel_success'].format(order_id=order_id))
-            
-            # Notify admin
-            admin_message = TEMPLATES['cancel_admin_notification'].format(
-                client_number=phone,
-                order_id=order_id
-            )
-            send_admin_notification(admin_message)
-            
-            session_manager.set_confirmed_order(phone, None)
-        else:
-            send_whatsapp_message(phone, "No hay pedido para cancelar.")
+    @staticmethod
+    def handle_payment(user_id, user_number, message):
+        session = session_manager.get_session(user_id)
         
-        session_manager.end_flow(phone)
-        return jsonify({"status": "success"}), 200
-    
-    # For payment flow, any message is considered as acknowledgment
-    order_id = session_manager.get_confirmed_order(phone)
-    if order_id:
-        send_whatsapp_message(phone, TEMPLATES['payment_success'].format(
-            order_id=order_id,
-            admin_number=CONFIG['ADMIN_NUMBERS'][0]
+        if message.lower() == 'cancelar':
+            session_manager.clear_current_flow(user_id)
+            send_message(user_number, Templates.cancel_action("envío de comprobante"))
+            send_admin_notification(Templates.cancel_admin_notification(
+                session.get('confirmed_order', 'N/A'), 
+                user_number, 
+                "envío de comprobante"
+            ))
+            return True
+        
+        if not message.startswith('-'):
+            send_message(user_number, Templates.invalid_format())
+            return False
+        
+        order_id = message[1:].strip()
+        if not order_id:
+            send_message(user_number, Templates.invalid_format())
+            return False
+        
+        # Pago procesado
+        session_manager.clear_current_flow(user_id)
+        
+        send_message(user_number, Templates.payment_success(order_id))
+        send_admin_notification(Templates.payment_admin_notification(
+            order_id, 
+            user_number
         ))
-        
-        # Notify admin
-        admin_message = TEMPLATES['payment_admin_notification'].format(
-            client_number=phone,
-            order_id=order_id
-        )
-        send_admin_notification(admin_message)
-    else:
-        send_whatsapp_message(phone, TEMPLATES['missing_confirmation'])
-    
-    session_manager.end_flow(phone)
-    return jsonify({"status": "success"}), 200
+        return True

@@ -1,23 +1,27 @@
-# Message templates with emojis and professional styling
-TEMPLATES = {
-    "welcome": """¡Hola! 💄 Soy tu asistente virtual de *LD Make Up*.
+from config import CONFIG
+
+class Templates:
+    @staticmethod
+    def welcome():
+        return """¡Hola! 💄 Soy tu asistente virtual de *LD Make Up*.
 
 Estoy aquí para ayudarte con:
-- Consultas sobre productos y precios 🛍️
-- Métodos de pago y envíos 💳🚚
-- Horarios y dirección de nuestro local 🏪
-- Asesoramiento profesional 💅
+- Consultas sobre productos y precios
+- Métodos de pago y envíos
+- Horarios y dirección de nuestro local
+- Asesoramiento profesional
 
-*Flujos rápidos:*
-- Escribe *confirmar* para validar tu pedido ✅
-- Escribe *mipago* para enviar comprobante 📄
-- Escribe *salir* para cerrar la sesión 🔚
+*Importante:*
+- Todas las notificaciones sobre tu pedido llegarán aquí 📦🔔
+- Para confirmar un pedido escribe *confirmar*
+- Para enviar comprobante escribe *mipago*
+- Escribe *salir* para cerrar la sesión
 
-*Importante:* Todas las notificaciones sobre el estado de tu pedido llegarán a este mismo chat. 📦🔔
+¿En qué puedo ayudarte hoy?"""
 
-¿En qué puedo ayudarte hoy?""",
-
-    "goodbye": """¡Gracias por contactar a LD Make Up! 💖
+    @staticmethod
+    def goodbye():
+        return """¡Gracias por contactar a LD Make Up! 💖
 
 Recuerda que estamos en:
 📍 Alsina 455, San Miguel de Tucumán
@@ -25,107 +29,105 @@ Recuerda que estamos en:
 
 Para cualquier otra consulta, ¡no dudes en escribirnos!
 
-¡Que tengas un día hermoso! ✨""",
+¡Que tengas un día hermoso! ✨"""
 
-    "notifications": """ℹ️ *Recordatorio importante:*
-Todas las notificaciones sobre el estado de tu pedido (confirmación, envío, etc.) llegarán a este mismo chat. No es necesario que respondas a estos mensajes automáticos. 📦🔔""",
+    @staticmethod
+    def notifications():
+        return """ℹ️ *Recordatorio importante:*
+Todas las notificaciones sobre el estado de tu pedido (confirmación, envío, etc.) llegarán a este mismo chat. No es necesario que respondas a estos mensajes automáticos. 📦🔔"""
 
-    "confirm_prompt": """📝 *Confirmación de Pedido*
+    @staticmethod
+    def confirm_prompt():
+        return """📝 *Confirmación de Pedido*
 
-Por favor, escribe el ID de tu pedido con el siguiente formato:
-`#ID_de_tu_pedido`
-Ejemplo: `#AB1234`
+Por favor, escribe el ID de tu pedido en el formato:
+#ID (ejemplo: #12345abc)
 
-ℹ️ Para cancelar el pedido, escribe:
-`-ID_de_tu_pedido`
-Ejemplo: `-AB1234`""",
+Escribe *cancelar* para anular este proceso."""
 
-    "payment_prompt": """💳 *Envío de Comprobante*
+    @staticmethod
+    def payment_prompt():
+        return """💳 *Envío de Comprobante*
 
-Por favor envía tu comprobante de pago junto con el ID de pedido al siguiente número:
-{admin_number}
+Por favor, envía tu comprobante de pago junto con el ID de pedido a este número:
+{}
 
-ℹ️ Para cancelar el pedido, escribe:
-`cancelar`""",
+Formato: 
+-ID (ejemplo: -12345abc)
 
-    "confirm_success": """✅ *Pedido Confirmado*
+Escribe *cancelar* para anular este proceso.""".format(CONFIG["ADMIN_NUMBERS"][0])
 
-¡Gracias! Hemos recibido tu confirmación para el pedido:
-ID: `{order_id}`
+    @staticmethod
+    def confirm_success(pedido_id):
+        return f"""✅ *Pedido Confirmado con Éxito*
 
-Un asistente revisará tu pedido y te notificará cualquier actualización. 📦""",
+Hemos registrado tu pedido con ID: {pedido_id}
 
-    "confirm_admin_notification": """📢 *Nueva Confirmación de Pedido*
+Pronto recibirás actualizaciones sobre el estado de tu compra. ¡Gracias por confiar en LD Make Up! 💄💖"""
 
-El cliente {client_number} ha confirmado el pedido:
-ID: `{order_id}`
+    @staticmethod
+    def confirm_admin_notification(pedido_id, user_number):
+        return f"""🔔 *Nuevo Pedido Confirmado*
 
-Por favor proceder con el procesamiento.""",
+El cliente {user_number} ha confirmado el pedido con ID: {pedido_id}
 
-    "payment_success": """📨 *Comprobante Solicitado*
+Por favor, procede con el procesamiento."""
 
-Hemos registrado tu solicitud para el pedido:
-ID: `{order_id}`
+    @staticmethod
+    def payment_success(pedido_id):
+        return f"""💰 *Comprobante Solicitado*
 
-Por favor envía el comprobante de pago al número:
-{admin_number}
+Hemos registrado tu solicitud para el pedido: {pedido_id}
 
-¡Gracias por tu compra! 💖""",
+Por favor, envía el comprobante al número indicado. ¡Gracias!"""
 
-    "payment_admin_notification": """💸 *Solicitud de Comprobante*
+    @staticmethod
+    def payment_admin_notification(pedido_id, user_number):
+        return f"""📤 *Comprobante Solicitado*
 
-El cliente {client_number} ha solicitado enviar comprobante para el pedido:
-ID: `{order_id}`
+El cliente {user_number} ha solicitado enviar comprobante para el pedido: {pedido_id}
 
-Por favor estar atento al envío del documento.""",
+Por favor, espera su documento."""
 
-    "cancel_success": """❌ *Pedido Cancelado*
+    @staticmethod
+    def cancel_action(action):
+        return f"""❌ *Proceso Cancelado*
 
-Hemos cancelado tu pedido:
-ID: `{order_id}`
+Has cancelado el proceso de {action}.
 
-Si fue un error, por favor contáctanos nuevamente. 😊""",
+¿En qué más puedo ayudarte?"""
 
-    "cancel_admin_notification": """⚠️ *Pedido Cancelado*
+    @staticmethod
+    def cancel_admin_notification(pedido_id, user_number, action):
+        return f"""⚠️ *Proceso Cancelado*
 
-El cliente {client_number} ha cancelado el pedido:
-ID: `{order_id}`""",
+El cliente {user_number} ha cancelado el {action} para el pedido: {pedido_id}"""
 
-    "invalid_format": """⚠️ *Formato Incorrecto*
+    @staticmethod
+    def invalid_format():
+        return """⚠️ *Formato Incorrecto*
 
-Por favor usa el formato solicitado:
-{format_instructions}
+Por favor, usa el formato indicado:
+- Para confirmar: #ID (ejemplo: #12345abc)
+- Para pago: -ID (ejemplo: -12345abc)
 
-Inténtalo de nuevo o escribe *salir* para cancelar.""",
+Intenta nuevamente o escribe *cancelar* para salir."""
 
-    "unrelated_message": """🤔 *Consulta no relacionada*
+    @staticmethod
+    def unrelated_query(attempt):
+        if attempt < CONFIG["MAX_ATTEMPTS"]:
+            return "Parece que tu consulta no está relacionada con LD Make Up. ¿En qué puedo ayudarte sobre maquillaje o productos de belleza? 💄"
+        else:
+            return f"Para consultas muy específicas, escribe a {CONFIG['ADMIN_NUMBERS'][0]}. Un asistente te ayudará. 📩"
 
-Parece que tu mensaje no está relacionado con LD Make Up. Por favor escribe algo sobre:
+    @staticmethod
+    def need_confirmation_first():
+        return """📌 *Primero Confirma tu Pedido*
 
-- Productos de maquillaje 💄
-- Insumos para uñas o pestañas 💅
-- Métodos de pago o envíos 🚚
+Para enviar tu comprobante de pago, primero debes confirmar tu pedido.
 
-¿En qué puedo ayudarte?""",
+Escribe *confirmar* para iniciar el proceso."""
 
-    "human_assistance": """👩💼 *Asistencia Personalizada*
-
-Para consultas muy específicas, por favor escribe a:
-{admin_number}
-
-Un asistente humano te ayudará personalmente. 📩""",
-
-    "flow_timeout": """⏱️ *Tiempo Agotado*
-
-La operación anterior ha expirado. Por favor inicia nuevamente el proceso que necesites.
-
-¿En qué más puedo ayudarte?""",
-
-    "missing_confirmation": """⚠️ *Confirmación Requerida*
-
-Para enviar tu comprobante, primero debes confirmar tu pedido.
-
-Escribe *confirmar* para iniciar el proceso de confirmación.
-
-¿Necesitas ayuda con algo más?"""
-}
+    @staticmethod
+    def session_closed():
+        return "🔒 Tu sesión ha sido cerrada. Escribe cualquier mensaje para comenzar una nueva."
