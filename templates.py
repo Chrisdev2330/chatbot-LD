@@ -1,11 +1,4 @@
-# Mensajes de flujo de conversación
-FLUJO_CONVERSACION = {
-    "agradecimiento": ["gracias", "muchas gracias", "thanks", "thank you"],
-    "despedida": ["adiós", "chao", "bye", "hasta luego", "nos vemos", "salir"],
-    "notificaciones": ["notificaciones", "estado de pedido", "seguimiento", "tracking"]
-}
-
-# Plantilla de bienvenida
+# Mensajes estáticos
 PLANTILLA_BIENVENIDA = """¡Hola! 💄 Soy tu asistente virtual de *LD Make Up*.
 
 Estoy aquí para ayudarte con:
@@ -15,117 +8,73 @@ Estoy aquí para ayudarte con:
 - Asesoramiento profesional
 
 *Importante:*
-- Todas las notificaciones sobre tu pedido llegarán aquí 📦🔔
-- Para *confirmar un pedido* escribe *CONFIRMAR*
-- Para enviar comprobante escribe *MIPAGO*
+- Escribe *confirmar* para confirmar tu pedido
+- Escribe *mipago* para enviar comprobante
+- Escribe *salir* para cerrar la sesión
 
-📍 *Dirección:* Alsina 455, San Miguel de Tucumán
-⏰ *Horario:* Lunes a Sábados 09:00-13:00 y 17:00-21:00
+Todas las notificaciones sobre tu pedido llegarán aquí. 📦🔔
 
 ¿En qué puedo ayudarte hoy?"""
 
 PLANTILLA_DESPEDIDA = """¡Gracias por contactar a LD Make Up! 💖
 
-Recuerda que estamos en:
-📍 Alsina 455, San Miguel de Tucumán
-⏰ Lunes a Sábados: 09:00-13:00 y 17:00-21:00
+📍 *Dirección:* Alsina 455, San Miguel de Tucumán
+⏰ *Horario:* Lunes a Sábados: 09:00-13:00 y 17:00-21:00
 
-Para cualquier otra consulta, ¡no dudes en escribirnos!
+Para cualquier otra consulta, ¡escríbenos! ✨"""
 
-¡Que tengas un día hermoso! ✨"""
+# Flujo de confirmación
+PLANTILLA_CONFIRMAR = """Por favor, escribe el ID de tu pedido en este formato:
+#ID (ejemplo: #74834)
 
-MENSAJE_NOTIFICACIONES = """ℹ️ *Recordatorio importante:*
-Todas las notificaciones sobre el estado de tu pedido (confirmación, envío, etc.) llegarán a este mismo chat. No es necesario que respondas a estos mensajes automáticos. 📦🔔"""
+O escribe:
+- Cancelar: Para cancelar el pedido
+- Regresar: Para volver al menú principal"""
 
-# Plantillas para flujo de confirmación
-PLANTILLA_CONFIRMAR_PEDIDO = """📝 *Confirmación de Pedido*
+PLANTILLA_CONFIRMACION_EXITOSA = """✅ *Pedido Confirmado*
+¡Gracias! Hemos confirmado tu pedido con ID: *{}*
+Un asistente te contactará si es necesario."""
 
-Por favor, escribe el ID de tu pedido en el siguiente formato:
-#ID (ejemplo: #12345abc)
+PLANTILLA_CANCELACION_EXITOSA = """❌ *Pedido Cancelado*
+Hemos cancelado tu pedido con ID: *{}*
+Si fue un error, contáctanos."""
 
-Opciones:
-- *CANCELAR*: Para cancelar este proceso
-- *REGRESAR*: Para volver al menú principal"""
+# Flujo de pago
+PLANTILLA_MIPAGO = """Por favor, envía tu comprobante de pago con el ID de pedido a este número: 
+👉 {} 
 
-PLANTILLA_PEDIDO_CONFIRMADO_CLIENTE = """✅ *¡Pedido Confirmado!*
+*Importante:*
+- El comprobante debe incluir el ID del pedido
+- Escribe *cancelar* si deseas anular"""
 
-Tu pedido con ID *#{}* ha sido confirmado con éxito. 
+PLANTILLA_PAGO_RECIBIDO = """💳 *Pago Registrado*
+Hemos recibido tu comprobante para el pedido: *{}*
+Estamos verificando y te notificaremos."""
 
-Ahora puedes enviar tu comprobante de pago escribiendo *MIPAGO*.
+# Mensajes de error
+PLANTILLA_ID_INVALIDO = """⚠️ Formato incorrecto
+Por favor, escribe el ID exactamente como se te indicó:
+#ID (ejemplo: #74834)"""
 
-Gracias por tu compra en LD Make Up! 💄💖"""
+PLANTILLA_FUERA_CONTEXTO = """Parece que tu consulta no está relacionada con LD Make Up. 
+¿En qué puedo ayudarte sobre maquillaje o productos de belleza? 💄"""
 
-PLANTILLA_PEDIDO_CONFIRMADO_ADMIN = """📢 *Nueva Confirmación de Pedido*
+PLANTILLA_CONTACTO_HUMANO = """Para consultas muy específicas, escribe a:
+👉 {} 
+Un asistente te ayudará personalmente. 📩"""
 
-El cliente ha confirmado el pedido con ID: *#{}*
+# Notificaciones para administradores
+NOTIF_CONFIRMACION_ADMIN = """📦 *Nueva Confirmación de Pedido*
+Cliente: {}
+ID Pedido: {}
+Fecha: {}"""
 
-Por favor, procede con el procesamiento del mismo."""
+NOTIF_CANCELACION_ADMIN = """❌ *Pedido Cancelado*
+Cliente: {}
+ID Pedido: {}
+Fecha: {}"""
 
-PLANTILLA_CONFIRMAR_PRIMERO = """⚠️ *Primero debes confirmar tu pedido*
-
-Para enviar tu comprobante de pago, primero debes confirmar tu pedido escribiendo *CONFIRMAR*.
-
-Si necesitas ayuda, no dudes en preguntar."""
-
-# Plantillas para flujo de pago
-PLANTILLA_ENVIAR_COMPROBANTE = """💳 *Enviar Comprobante de Pago*
-
-Por favor, escribe el ID de tu pedido en el siguiente formato:
-#ID (ejemplo: #12345abc)
-
-Luego envía tu comprobante de pago al número:
-👉 +584241220797
-
-Opciones:
-- *CANCELAR*: Para cancelar este proceso"""
-
-PLANTILLA_COMPROBANTE_RECIBIDO_CLIENTE = """✅ *¡Comprobante Recibido!*
-
-Hemos registrado tu comprobante para el pedido *#{}*. 
-
-Nuestro equipo verificará el pago y te notificará cuando tu pedido sea despachado.
-
-¡Gracias por confiar en LD Make Up! 💖"""
-
-PLANTILLA_COMPROBANTE_RECIBIDO_ADMIN = """📢 *Nuevo Comprobante Recibido*
-
-El cliente ha enviado comprobante para el pedido con ID: *#{}*
-
-Por favor, verifica el pago y procede con el despacho."""
-
-# Plantillas para cancelación
-PLANTILLA_CANCELAR_PEDIDO_CLIENTE = """❌ *Pedido Cancelado*
-
-Has cancelado el proceso de confirmación de pedido. 
-
-Si fue un error, puedes iniciar nuevamente escribiendo *CONFIRMAR*."""
-
-PLANTILLA_CANCELAR_PEDIDO_ADMIN = """❌ *Pedido Cancelado*
-
-El cliente ha cancelado el pedido con ID: *#{}*"""
-
-PLANTILLA_CANCELAR_PAGO_CLIENTE = """❌ *Proceso de Pago Cancelado*
-
-Has cancelado el envío del comprobante de pago. 
-
-Si fue un error, puedes iniciar nuevamente escribiendo *MIPAGO*."""
-
-PLANTILLA_CANCELAR_PAGO_ADMIN = """❌ *Pago Cancelado*
-
-El cliente ha cancelado el envío de comprobante para el pedido con ID: *#{}*"""
-
-# Plantilla para formato incorrecto
-PLANTILLA_FORMATO_INCORRECTO = """⚠️ *Formato Incorrecto*
-
-Por favor, escribe el ID de tu pedido comenzando con # o - seguido del número de ID (ejemplo: #12345abc o -12345abc)
-
-O escribe *CANCELAR* para terminar este proceso."""
-
-# Plantilla para contacto humano
-PLANTILLA_CONTACTO_HUMANO = """👩💼 *Asistencia Personalizada*
-
-Parece que necesitas ayuda más específica. Por favor, escribe directamente a nuestro asistente humano:
-
-👉 +584241220797
-
-Te atenderemos con gusto. 💖"""
+NOTIF_PAGO_ADMIN = """💳 *Comprobante Recibido*
+Cliente: {}
+ID Pedido: {}
+Fecha: {}"""

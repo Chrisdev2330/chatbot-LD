@@ -12,3 +12,5 @@ requests
 certifi
 PyYAML
 openai
+cachetools
+httpx
