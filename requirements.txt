@@ -8,3 +8,6 @@ python-dotenv
 jsonify
 woocommerce
 python-dateutil
+requests
+certifi
+PyYAML
