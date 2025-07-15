@@ -8,12 +8,13 @@ from templates import (
 )
 
 class FlowManager:
-    def __init__(self, whatsapp_api, admin_number):
+    def __init__(self, whatsapp_api, session_manager, admin_number):
         self.whatsapp = whatsapp_api
+        self.session_manager = session_manager
         self.admin_number = admin_number
     
     def start_flow(self, phone_number, flow_name):
-        session = session_manager.get_session(phone_number)
+        session = self.session_manager.get_session(phone_number)
         session.current_flow = flow_name
         
         if flow_name == "confirmar":
@@ -24,83 +25,85 @@ class FlowManager:
                     phone_number, 
                     PLANTILLA_MIPAGO.format(session.confirmed_order_id)
                 )
-                session_manager.clear_current_flow(phone_number)
-            else:
-                self.whatsapp.send_message(
-                    phone_number,
-                    "⚠️ No puedes ingresar a esta opción de pagos si antes no confirmas tu pedido.\n\nPor favor escribe 'confirmar' para confirmar tu pedido."
-                )
-                session_manager.clear_current_flow(phone_number)
+                self.session_manager.clear_current_flow(phone_number)
     
     def handle_flow(self, session, message):
-        phone_number = session.phone_number
-        flow_name = session.current_flow
-        message = message.lower().strip()
+        message = message.strip().lower()
         
-        if flow_name == "confirmar":
+        if session.current_flow == "confirmar":
             self._handle_confirm_flow(session, message)
-        elif flow_name == "mipago":
+        elif session.current_flow == "mipago":
             self._handle_payment_flow(session, message)
     
     def _handle_confirm_flow(self, session, message):
         phone_number = session.phone_number
-        flow_data = session_manager.get_flow_data(phone_number)
+        flow_data = self.session_manager.get_flow_data(phone_number)
         
         if 'order_id' not in flow_data:
-            # First step: Get order ID
-            if message.lower() == 'salir':
+            # Paso 1: Obtener ID del pedido
+            if message == 'salir':
                 self.whatsapp.send_message(phone_number, "Has salido del proceso de confirmación.")
-                session_manager.clear_current_flow(phone_number)
+                self.session_manager.clear_current_flow(phone_number)
             else:
-                session_manager.set_flow_data(phone_number, 'order_id', message)
+                # Guardar cualquier valor como ID del pedido
+                self.session_manager.set_flow_data(phone_number, 'order_id', message)
                 self.whatsapp.send_message(
                     phone_number,
                     PLANTILLA_CONFIRMAR_OPCIONES.format(message)
                 )
         else:
-            # Second step: Confirm or cancel
+            # Paso 2: Confirmar o cancelar pedido
             order_id = flow_data['order_id']
             
             if message == 'si':
-                # Confirm order
-                session_manager.set_order_id(phone_number, order_id)
+                # Confirmar pedido
+                self.session_manager.set_order_id(phone_number, order_id)
+                
+                # Mensaje al cliente
                 self.whatsapp.send_message(
                     phone_number,
                     PLANTILLA_PEDIDO_CONFIRMADO.format(order_id)
                 )
                 
-                # Notify admin
-                self.whatsapp.send_message(
-                    self.admin_number,
-                    f"✅ Nuevo pedido confirmado\nID: {order_id}\nCliente: {phone_number}"
+                # Notificación al administrador
+                self.whatsapp.send_message_to_admin(
+                    f"✅ NUEVO PEDIDO CONFIRMADO\n\n"
+                    f"ID: {order_id}\n"
+                    f"Cliente: {phone_number}\n"
+                    f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
                 )
                 
-                session_manager.clear_current_flow(phone_number)
+                self.session_manager.clear_current_flow(phone_number)
+            
             elif message == 'no':
-                # Cancel order
+                # Cancelar pedido
                 self.whatsapp.send_message(
                     phone_number,
                     PLANTILLA_PEDIDO_CANCELADO.format(order_id)
                 )
                 
-                # Notify admin
-                self.whatsapp.send_message(
-                    self.admin_number,
-                    f"❌ Pedido cancelado\nID: {order_id}\nCliente: {phone_number}"
+                # Notificación al administrador
+                self.whatsapp.send_message_to_admin(
+                    f"❌ PEDIDO CANCELADO\n\n"
+                    f"ID: {order_id}\n"
+                    f"Cliente: {phone_number}\n"
+                    f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
                 )
                 
-                session_manager.clear_current_flow(phone_number)
+                self.session_manager.clear_current_flow(phone_number)
+            
             elif message == 'salir':
                 self.whatsapp.send_message(phone_number, "Has salido del proceso de confirmación.")
-                session_manager.clear_current_flow(phone_number)
+                self.session_manager.clear_current_flow(phone_number)
+            
             else:
                 self.whatsapp.send_message(phone_number, MENSAJE_SIGUE_INSTRUCCIONES)
     
     def _handle_payment_flow(self, session, message):
-        # The payment flow is simple - just show instructions and exit
-        # This shouldn't normally be called since we exit after showing instructions
+        # Este flujo es simple, solo muestra instrucciones y sale
+        # No debería llegar aquí normalmente
         self.whatsapp.send_message(
             session.phone_number,
             "Por favor envía tu comprobante al número indicado con tu ID de pedido."
         )
-        session_manager.clear_current_flow(session.phone_number)
+        self.session_manager.clear_current_flow(session.phone_number)

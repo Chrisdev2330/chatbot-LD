@@ -1,10 +1,12 @@
 import requests
 import json
+from datetime import datetime
 
 class WhatsAppAPI:
-    def __init__(self, access_token, phone_number_id):
+    def __init__(self, access_token, phone_number_id, admin_number):
         self.access_token = access_token
         self.phone_number_id = phone_number_id
+        self.admin_number = admin_number
         self.base_url = f"https://graph.facebook.com/v18.0/{self.phone_number_id}/messages"
     
     def send_message(self, recipient, message):
@@ -37,4 +39,5 @@ class WhatsAppAPI:
             return None
     
     def send_message_to_admin(self, message):
+        """Envía mensaje al número de administrador"""
         return self.send_message(self.admin_number, message)
