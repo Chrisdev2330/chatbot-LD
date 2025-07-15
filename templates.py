@@ -1,4 +1,3 @@
-# Mensajes estáticos
 PLANTILLA_BIENVENIDA = """¡Hola! 💄 Soy tu asistente virtual de *LD Make Up*.
 
 Estoy aquí para ayudarte con:
@@ -7,74 +6,83 @@ Estoy aquí para ayudarte con:
 - Horarios y dirección de nuestro local
 - Asesoramiento profesional
 
-*Importante:*
-- Escribe *confirmar* para confirmar tu pedido
-- Escribe *mipago* para enviar comprobante
-- Escribe *salir* para cerrar la sesión
+*Importante:* Todas las notificaciones sobre el estado de tu pedido llegarán a este mismo chat. 📦🔔
 
-Todas las notificaciones sobre tu pedido llegarán aquí. 📦🔔
+¿En qué puedo ayudarte hoy?
 
-¿En qué puedo ayudarte hoy?"""
+Escribe:
+- *confirmar* para confirmar un pedido
+- *mipago* para enviar comprobante
+- *salir* para cerrar la sesión"""
 
 PLANTILLA_DESPEDIDA = """¡Gracias por contactar a LD Make Up! 💖
 
-📍 *Dirección:* Alsina 455, San Miguel de Tucumán
-⏰ *Horario:* Lunes a Sábados: 09:00-13:00 y 17:00-21:00
+Recuerda que estamos en:
+📍 Alsina 455, San Miguel de Tucumán
+⏰ Lunes a Sábados: 09:00-13:00 y 17:00-21:00
 
-Para cualquier otra consulta, ¡escríbenos! ✨"""
+Para cualquier otra consulta, ¡no dudes en escribirnos!
 
-# Flujo de confirmación
-PLANTILLA_CONFIRMAR = """Por favor, escribe el ID de tu pedido en este formato:
-#ID (ejemplo: #74834)
+¡Que tengas un día hermoso! ✨"""
 
-O escribe:
-- Cancelar: Para cancelar el pedido
-- Regresar: Para volver al menú principal"""
+PLANTILLA_CONFIRMAR_PEDIDO = """📝 *Confirmación de Pedido*
 
-PLANTILLA_CONFIRMACION_EXITOSA = """✅ *Pedido Confirmado*
+Por favor, escribe el ID de tu pedido en el siguiente formato:
+#ID (ejemplo: #12345)
+
+O si deseas cancelar:
+-ID (ejemplo: -12345)"""
+
+PLANTILLA_PEDIDO_CONFIRMADO_CLIENTE = """✅ *Pedido Confirmado*
+
 ¡Gracias! Hemos confirmado tu pedido con ID: *{}*
-Un asistente te contactará si es necesario."""
 
-PLANTILLA_CANCELACION_EXITOSA = """❌ *Pedido Cancelado*
+Recuerda que puedes:
+- Enviar tu comprobante escribiendo *mipago*
+- Consultar el estado de tu pedido en cualquier momento"""
+
+PLANTILLA_PEDIDO_CONFIRMADO_ADMIN = """🔔 *Nueva Confirmación de Pedido*
+
+El cliente ha confirmado el pedido con ID: *{}*
+
+Por favor, procede con el procesamiento."""
+
+PLANTILLA_PEDIDO_CANCELADO_CLIENTE = """❌ *Pedido Cancelado*
+
 Hemos cancelado tu pedido con ID: *{}*
-Si fue un error, contáctanos."""
 
-# Flujo de pago
-PLANTILLA_MIPAGO = """Por favor, envía tu comprobante de pago con el ID de pedido a este número: 
-👉 {} 
+Si fue un error, puedes iniciar el proceso nuevamente."""
 
-*Importante:*
-- El comprobante debe incluir el ID del pedido
-- Escribe *cancelar* si deseas anular"""
+PLANTILLA_PEDIDO_CANCELADO_ADMIN = """⚠️ *Pedido Cancelado*
 
-PLANTILLA_PAGO_RECIBIDO = """💳 *Pago Registrado*
-Hemos recibido tu comprobante para el pedido: *{}*
-Estamos verificando y te notificaremos."""
+El cliente ha cancelado el pedido con ID: *{}*
 
-# Mensajes de error
-PLANTILLA_ID_INVALIDO = """⚠️ Formato incorrecto
-Por favor, escribe el ID exactamente como se te indicó:
-#ID (ejemplo: #74834)"""
+Por favor, actualiza el sistema."""
 
-PLANTILLA_FUERA_CONTEXTO = """Parece que tu consulta no está relacionada con LD Make Up. 
-¿En qué puedo ayudarte sobre maquillaje o productos de belleza? 💄"""
+PLANTILLA_ENVIAR_COMPROBANTE = """💳 *Enviar Comprobante*
 
-PLANTILLA_CONTACTO_HUMANO = """Para consultas muy específicas, escribe a:
-👉 {} 
-Un asistente te ayudará personalmente. 📩"""
+Por favor, envía el comprobante de pago al siguiente número:
+{}
 
-# Notificaciones para administradores
-NOTIF_CONFIRMACION_ADMIN = """📦 *Nueva Confirmación de Pedido*
-Cliente: {}
-ID Pedido: {}
-Fecha: {}"""
+Incluye el ID de tu pedido en el mensaje.
 
-NOTIF_CANCELACION_ADMIN = """❌ *Pedido Cancelado*
-Cliente: {}
-ID Pedido: {}
-Fecha: {}"""
+¡Gracias por tu compra! 💖"""
 
-NOTIF_PAGO_ADMIN = """💳 *Comprobante Recibido*
-Cliente: {}
-ID Pedido: {}
-Fecha: {}"""
+PLANTILLA_CONFIRMAR_PRIMERO = """⚠️ *Acción Requerida*
+
+Para enviar tu comprobante, primero debes *confirmar* tu pedido.
+
+Escribe *confirmar* y sigue las instrucciones."""
+
+PLANTILLA_ID_INVALIDO = """❌ *Formato Incorrecto*
+
+Por favor, escribe el ID en el formato correcto:
+- Para confirmar: #ID (ejemplo: #12345)
+- Para cancelar: -ID (ejemplo: -12345)"""
+
+PLANTILLA_ERROR_IA = """⚠️ *Error de conexión*
+
+Lo sentimos, estamos teniendo problemas técnicos. Por favor, intenta nuevamente más tarde o escribe al número +584241220797 para asistencia inmediata."""
+
+MENSAJE_NOTIFICACIONES = """ℹ️ *Recordatorio importante:*
+Todas las notificaciones sobre el estado de tu pedido (confirmación, envío, etc.) llegarán a este mismo chat. No es necesario que respondas a estos mensajes automáticos. 📦🔔"""
