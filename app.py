@@ -10,7 +10,7 @@ sessions = SessionManager()
 whatsapp = WhatsAppAPI()
 
 # Cargar prompt
-with open('src/prompt.txt', 'r', encoding='utf-8') as f:
+with open('prompt.txt', 'r', encoding='utf-8') as f:
     PROMPT = f.read()
 
 def handle_confirmar_flow(user_id, user_message):
