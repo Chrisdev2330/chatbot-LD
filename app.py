@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 from sessions import SessionManager
-from whatsapp import WhatsAppAPI
+from whasatpp import WhatsAppAPI
 from gemini import GeminiAI
 from templates import *
 import os
