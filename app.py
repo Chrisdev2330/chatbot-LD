@@ -2,7 +2,7 @@ from flask import Flask, jsonify, request
 from config import Config
 from services.ai_service import AIService
 from services.whatsapp_service import WhatsAppService
-from templates.messages import (
+from  messages2 import (
     BIENVENIDA, DESPEDIDA, CONFIRMAR_PEDIDO, PEDIR_COMPROBANTE, FLUJO_CONVERSACION
 )
 import asyncio
