@@ -1,11 +1,16 @@
 from flask import Flask, jsonify, request
 from config import Config
-from services.ai_service import ai_service
-from services.whatsapp_service import whatsapp_service
+from services.ai_service import AIService
+from services.whatsapp_service import WhatsAppService
+from templates.messages import (
+    BIENVENIDA, DESPEDIDA, CONFIRMAR_PEDIDO, PEDIR_COMPROBANTE, FLUJO_CONVERSACION
+)
 import asyncio
 from functools import wraps
 
 app = Flask(__name__)
+ai_service = AIService()
+whatsapp_service = WhatsAppService()
 
 def async_route(f):
     @wraps(f)
@@ -16,73 +21,41 @@ def async_route(f):
 @app.route("/webhook/", methods=["POST", "GET"])
 @async_route
 async def webhook_whatsapp():
-    # Verificación del token (GET)
     if request.method == "GET":
-        if request.args.get('hub.verify_token') == Config.VERIFY_TOKEN:
+        if request.args.get('hub.verify_token') == Config.WEBHOOK_VERIFY_TOKEN:
             return request.args.get('hub.challenge')
         return "Error de autentificación", 403
     
-    # Procesamiento de mensajes (POST)
     try:
         data = request.get_json()
+        entry = data['entry'][0]['changes'][0]['value']
         
-        # Extraer información del mensaje
-        entry = data['entry'][0]
-        changes = entry['changes'][0]
-        value = changes['value']
+        if 'messages' not in entry:
+            return jsonify({"status": "success"}), 200
+            
+        message_data = entry['messages'][0]
+        phone = message_data['from']
+        message = message_data['text']['body'].lower() if 'text' in message_data else ""
         
-        # Verificar si hay mensajes
-        if 'messages' not in value:
-            return jsonify({"status": "success"}), 200
+        # Manejo de mensajes
+        if any(palabra in message for palabra in FLUJO_CONVERSACION["saludo"]):
+            await whatsapp_service.send_message(phone, BIENVENIDA)
+        elif any(palabra in message for palabra in FLUJO_CONVERSACION["despedida"]):
+            await whatsapp_service.send_message(phone, DESPEDIDA)
+        elif "confirmar" in message:
+            await whatsapp_service.send_message(phone, CONFIRMAR_PEDIDO)
+        elif "mipago" in message:
+            await whatsapp_service.send_message(phone, PEDIR_COMPROBANTE)
+        else:
+            # Consultar a la IA para otras preguntas
+            ai_response = await ai_service.generate_response(message)
+            await whatsapp_service.send_message(phone, ai_response)
             
-        message = value['messages'][0]
-        telefono_cliente = message['from']
-        mensaje = message['text']['body'].lower() if 'text' in message else ''
-        
-        # Manejar mensajes especiales
-        if not mensaje:
-            return jsonify({"status": "success"}), 200
-            
-        # Comandos especiales
-        if mensaje == 'confirmar':
-            whatsapp_service.send_message(telefono_cliente, Config.CONFIRMAR_PEDIDO)
-            return jsonify({"status": "success"}), 200
-            
-        if mensaje == 'mipago':
-            whatsapp_service.send_message(telefono_cliente, Config.PEDIR_COMPROBANTE)
-            return jsonify({"status": "success"}), 200
-            
-        if mensaje == 'salir':
-            whatsapp_service.send_message(telefono_cliente, Config.DESPEDIDA)
-            return jsonify({"status": "success"}), 200
-            
-        # Mensaje de bienvenida para saludos iniciales
-        saludos = ["hola", "hi", "hello", "buenos días", "buenas tardes", "buenas noches"]
-        if any(saludo in mensaje for saludo in saludos):
-            whatsapp_service.send_message(telefono_cliente, Config.BIENVENIDA)
-            return jsonify({"status": "success"}), 200
-            
-        # Mensajes de despedida
-        despedidas = ["adiós", "chao", "bye", "hasta luego", "nos vemos"]
-        if any(despedida in mensaje for despedida in despedidas):
-            whatsapp_service.send_message(telefono_cliente, Config.DESPEDIDA)
-            return jsonify({"status": "success"}), 200
-            
-        # Agradecimientos
-        agradecimientos = ["gracias", "muchas gracias", "thanks", "thank you"]
-        if any(agradecimiento in mensaje for agradecimiento in agradecimientos):
-            whatsapp_service.send_message(telefono_cliente, "¡Es un placer ayudarte! 😊 ¿Necesitas algo más?")
-            return jsonify({"status": "success"}), 200
-            
-        # Procesar con IA para otros mensajes
-        respuesta_ia = await ai_service.generate_response(mensaje)
-        whatsapp_service.send_message(telefono_cliente, respuesta_ia)
-        
-        return jsonify({"status": "success"}), 200
-        
     except Exception as e:
-        print(f"Error en webhook: {str(e)}")
+        print(f"Error processing webhook: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+    
+    return jsonify({"status": "success"}), 200
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5000, debug=True)

@@ -1,5 +1,6 @@
 from heyoo import WhatsApp
 from config import Config
+import asyncio
 
 class WhatsAppService:
     def __init__(self):
@@ -7,14 +8,15 @@ class WhatsAppService:
         self.phone_id = Config.WHATSAPP_PHONE_ID
         self.client = WhatsApp(self.token, self.phone_id)
     
-    def send_message(self, to: str, message: str):
+    async def send_message(self, phone: str, message: str):
         try:
-            # Reemplazar "521" por "58" si es necesario (para números venezolanos)
-            # to = to.replace("521", "58")
-            self.client.send_message(message, to)
+            # phone = phone.replace("521", "58")  # Descomenta si necesitas formatear el número
+            await asyncio.to_thread(
+                self.client.send_message,
+                message=message,
+                recipient_id=phone
+            )
+            return True
         except Exception as e:
-            print(f"Error al enviar mensaje a {to}: {str(e)}")
-            # Podrías implementar un reintento aquí si lo deseas
-
-# Instancia global del servicio de WhatsApp
-whatsapp_service = WhatsAppService()
+            print(f"Error sending WhatsApp message: {e}")
+            return False
