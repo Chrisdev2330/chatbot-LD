@@ -1,71 +1,42 @@
-from datetime import datetime, timedelta
-
-class UserSession:
-    def __init__(self, phone_number):
-        self.phone_number = phone_number
-        self.created_at = datetime.now()
-        self.last_activity = datetime.now()
-        self.is_new_session = True
-        self.conversation_history = []
-        self.current_flow = None
-        self.confirmed_order_id = None
-        self.flow_data = {}
+import time
 
 class SessionManager:
     def __init__(self):
         self.sessions = {}
-        self.session_timeout = timedelta(hours=24)
     
-    def get_session(self, phone_number):
-        self.cleanup_sessions()
+    def get_session(self, user_id):
+        # Clear expired sessions first
+        self._clean_expired_sessions()
         
-        if phone_number not in self.sessions:
-            self.sessions[phone_number] = UserSession(phone_number)
+        # Get or create session
+        if user_id not in self.sessions:
+            self.sessions[user_id] = {
+                'created_at': time.time(),
+                'initialized': False,
+                'current_flow': None,
+                'flow_data': {},
+                'last_interaction': time.time()
+            }
         else:
-            self.sessions[phone_number].last_activity = datetime.now()
+            self.sessions[user_id]['last_interaction'] = time.time()
         
-        return self.sessions[phone_number]
+        return self.sessions[user_id]
     
-    def cleanup_sessions(self):
-        now = datetime.now()
-        expired_sessions = [
-            phone for phone, session in self.sessions.items() 
-            if now - session.last_activity > self.session_timeout
+    def save_session(self, user_id, session_data):
+        self.sessions[user_id] = session_data
+        self.sessions[user_id]['last_interaction'] = time.time()
+    
+    def end_flow(self, user_id):
+        if user_id in self.sessions:
+            self.sessions[user_id]['current_flow'] = None
+            self.sessions[user_id]['flow_data'] = {}
+    
+    def _clean_expired_sessions(self):
+        current_time = time.time()
+        expired_users = [
+            user_id for user_id, session in self.sessions.items()
+            if current_time - session['last_interaction'] > 86400  # 24 hours
         ]
         
-        for phone in expired_sessions:
-            del self.sessions[phone]
-    
-    def add_message_to_history(self, phone_number, role, content):
-        if phone_number in self.sessions:
-            self.sessions[phone_number].conversation_history.append({
-                "role": "user" if role == "user" else "assistant",
-                "content": content
-            })
-    
-    def get_conversation_history(self, phone_number):
-        if phone_number in self.sessions:
-            return self.sessions[phone_number].conversation_history
-        return []
-    
-    def set_current_flow(self, phone_number, flow_name):
-        if phone_number in self.sessions:
-            self.sessions[phone_number].current_flow = flow_name
-    
-    def clear_current_flow(self, phone_number):
-        if phone_number in self.sessions:
-            self.sessions[phone_number].current_flow = None
-            self.sessions[phone_number].flow_data = {}
-    
-    def set_order_id(self, phone_number, order_id):
-        if phone_number in self.sessions:
-            self.sessions[phone_number].confirmed_order_id = order_id
-    
-    def get_flow_data(self, phone_number):
-        if phone_number in self.sessions:
-            return self.sessions[phone_number].flow_data
-        return {}
-    
-    def set_flow_data(self, phone_number, key, value):
-        if phone_number in self.sessions:
-            self.sessions[phone_number].flow_data[key] = value
+        for user_id in expired_users:
+            del self.sessions[user_id]

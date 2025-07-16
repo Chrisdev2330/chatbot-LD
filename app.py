@@ -1,124 +1,88 @@
 from flask import Flask, jsonify, request
-from openai import OpenAI
-from datetime import datetime, timedelta
-import os
+from whatsapp_api import WhatsAppAPI
+from gemini_client import GeminiClient
 from sessions import SessionManager
 from flows import FlowManager
 from templates import (
-    PLANTILLA_BIENVENIDA,
-    PLANTILLA_DESPEDIDA,
-    MENSAJE_INSTRUCCIONES,
-    MENSAJE_FUERA_CONTEXTO
+    WELCOME_TEMPLATE,
+    GOODBYE_TEMPLATE,
+    NOTIFICATIONS_INFO
 )
-from whatsapp_api import WhatsAppAPI
+import os
+import time
 
 app = Flask(__name__)
 
-# Configuración
-WHATSAPP_TOKEN = 'EAAOxgq6y2fwBPE7uSprf6b8R9o11T4OaRQVFgEmxFeZA6S797ZBqx4364yZCXhq8jwqArtK9ZCreyO6KZAgcx1R04CcMjjZCKxYhjl4adNBHneTwz6SPj18nBWbhv7u2GanUn0OpdNWdFWQmjHqOdKTJmiadeu3oOudzmfKW9jU7fIK26eeff3BCSklGKyjev5xQZDZD'
-WHATSAPP_PHONE_ID = '730238483499494'
-ADMIN_NUMBER = '584241220797'  # Número de administrador actual
-
-# Inicializar servicios
-whatsapp = WhatsAppAPI(WHATSAPP_TOKEN, WHATSAPP_PHONE_ID, ADMIN_NUMBER)
-session_manager = SessionManager()
-flow_manager = FlowManager(whatsapp, session_manager, ADMIN_NUMBER)
-
-# Inicializar cliente de Gemini
-client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key="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"
+# Initialize components
+whatsapp = WhatsAppAPI(
+    token=os.getenv('WHATSAPP_TOKEN'),
+    phone_id=os.getenv('WHATSAPP_PHONE_ID')
 )
-
-def load_prompt():
-    with open('prompt.txt', 'r', encoding='utf-8') as file:
-        return file.read()
-
-PROMPT_BASE = load_prompt()
-
-def generate_ai_response(message, session_id):
-    history = session_manager.get_conversation_history(session_id)
-    
-    messages = [{"role": "system", "content": PROMPT_BASE}]
-    messages.extend(history[-4:])
-    messages.append({"role": "user", "content": message})
-    
-    try:
-        completion = client.chat.completions.create(
-            model="google/gemini-2.5-flash",
-            messages=messages,
-            temperature=0.7,
-            max_tokens=500
-        )
-        return completion.choices[0].message.content
-    except Exception as e:
-        print(f"Error generating AI response: {e}")
-        return "Disculpas, hubo un error al procesar tu mensaje. Por favor intenta nuevamente."
+gemini = GeminiClient(api_key=os.getenv('GEMINI_API_KEY'))
+sessions = SessionManager()
+flows = FlowManager(whatsapp, sessions)
 
 @app.route("/webhook/", methods=["POST", "GET"])
 def webhook_whatsapp():
+    # Verify webhook
     if request.method == "GET":
-        if request.args.get('hub.verify_token') == "HolaNovato":
+        if request.args.get('hub.verify_token') == os.getenv('VERIFY_TOKEN'):
             return request.args.get('hub.challenge')
-        return "Error de autentificacion."
+        return "Authentication failed", 403
     
+    # Process incoming message
     data = request.get_json()
     
+    # Skip non-message events
     try:
-        if 'messages' not in data['entry'][0]['changes'][0]['value']:
+        message_data = data['entry'][0]['changes'][0]['value']
+        if 'messages' not in message_data:
             return jsonify({"status": "success"}), 200
     except:
         return jsonify({"status": "error"}), 400
     
-    # Extraer datos del mensaje
-    message_data = data['entry'][0]['changes'][0]['value']['messages'][0]
-    telefono_cliente = message_data['from']
-    mensaje = message_data['text']['body'].strip()  # Limpiar espacios
-    message_id = message_data['id']
-    timestamp = message_data['timestamp']
-
-    # Obtener sesión
-    session = session_manager.get_session(telefono_cliente)
+    # Extract message info
+    message = message_data['messages'][0]
+    sender = message['from']
+    text = message['text']['body'].lower().strip()
+    timestamp = message['timestamp']
     
-    # Verificar si está en un flujo activo
-    if session.current_flow:
-        flow_manager.handle_flow(session, mensaje)
+    # Get or create session
+    session = sessions.get_session(sender)
+    
+    # Check if user is in a flow
+    if session.get('current_flow'):
+        flows.handle_flow(sender, text, session)
         return jsonify({"status": "success"}), 200
     
-    # Manejar comandos especiales (confirmar/mipago)
-    if mensaje.lower() == "confirmar":
-        flow_manager.start_flow(telefono_cliente, "confirmar")
+    # Handle first message
+    if not session.get('initialized'):
+        whatsapp.send_message(sender, WELCOME_TEMPLATE)
+        session['initialized'] = True
+        sessions.save_session(sender, session)
         return jsonify({"status": "success"}), 200
     
-    if mensaje.lower() == "mipago":
-        if not session.confirmed_order_id:
-            whatsapp.send_message(
-                telefono_cliente,
-                "⚠️ No puedes ingresar a esta opción de pagos si antes no confirmas tu pedido.\n\n" +
-                "Por favor escribe 'confirmar' para confirmar tu pedido."
-            )
-        else:
-            flow_manager.start_flow(telefono_cliente, "mipago")
+    # Handle special commands
+    if text in ['confirmar', 'mipago']:
+        flows.handle_flow(sender, text, session)
         return jsonify({"status": "success"}), 200
     
-    # Mensaje inicial de bienvenida
-    if session.is_new_session or any(palabra in mensaje.lower() for palabra in ["hola", "hi", "hello", "buenos días", "buenas tardes", "buenas"]):
-        whatsapp.send_message(telefono_cliente, PLANTILLA_BIENVENIDA)
-        session.is_new_session = False
+    # Handle goodbye messages
+    if any(word in text for word in ['adiós', 'chao', 'bye', 'hasta luego', 'nos vemos']):
+        whatsapp.send_message(sender, GOODBYE_TEMPLATE)
         return jsonify({"status": "success"}), 200
     
-    # Mensaje de despedida
-    if any(palabra in mensaje.lower() for palabra in ["adiós", "chao", "bye", "hasta luego", "nos vemos"]):
-        whatsapp.send_message(telefono_cliente, PLANTILLA_DESPEDIDA)
+    # Handle notifications info
+    if any(word in text for word in ['notificaciones', 'estado', 'seguimiento', 'tracking']):
+        whatsapp.send_message(sender, NOTIFICATIONS_INFO)
         return jsonify({"status": "success"}), 200
     
-    # Generar respuesta con IA
-    ai_response = generate_ai_response(mensaje, telefono_cliente)
-    whatsapp.send_message(telefono_cliente, ai_response)
-    
-    # Actualizar historial de conversación
-    session_manager.add_message_to_history(telefono_cliente, "user", mensaje)
-    session_manager.add_message_to_history(telefono_cliente, "assistant", ai_response)
+    # Handle with Gemini AI
+    try:
+        response = gemini.generate_response(text, session)
+        whatsapp.send_message(sender, response)
+    except Exception as e:
+        whatsapp.send_message(sender, "Disculpas, hubo un error. Por favor contacta al +54 9 3813 02-1066 para asistencia.")
     
     return jsonify({"status": "success"}), 200
 
