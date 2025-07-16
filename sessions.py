@@ -1,4 +1,3 @@
-import time
 from datetime import datetime, timedelta
 
 class SessionManager:
@@ -15,23 +14,30 @@ class SessionManager:
         self.sessions[user_id] = {
             'created_at': datetime.now(),
             'flow': None,
-            'data': {}
+            'data': {},
+            'last_interaction': datetime.now()
         }
     
     def _is_expired(self, user_id):
         return datetime.now() - self.sessions[user_id]['created_at'] > self.session_timeout
     
+    def update_last_interaction(self, user_id):
+        self.get_session(user_id)['last_interaction'] = datetime.now()
+    
     def set_flow(self, user_id, flow):
         self.get_session(user_id)['flow'] = flow
+        self.update_last_interaction(user_id)
     
     def get_flow(self, user_id):
         return self.get_session(user_id)['flow']
     
     def set_data(self, user_id, key, value):
         self.get_session(user_id)['data'][key] = value
+        self.update_last_interaction(user_id)
     
     def get_data(self, user_id, key):
         return self.get_session(user_id)['data'].get(key)
     
     def clear_flow(self, user_id):
         self.get_session(user_id)['flow'] = None
+        self.update_last_interaction(user_id)

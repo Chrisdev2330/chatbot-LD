@@ -1,5 +1,5 @@
 import requests
-from config import WHATSAPP_TOKEN, WHATSAPP_NUMBER_ID
+from config import WHATSAPP_TOKEN, WHATSAPP_NUMBER_ID, ADMIN_NUMBER
 
 class WhatsAppAPI:
     @staticmethod
