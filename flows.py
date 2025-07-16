@@ -1,121 +1,50 @@
-class FlowManager:
-    def __init__(self, whatsapp_api, session_manager):
-        self.whatsapp = whatsapp_api
-        self.sessions = session_manager
-        self.admin_number = "584241220797"  # Static admin number
+from sessions import session_manager
+from templates import *
+from config import ADMIN_NUMBERS
+from whatsapp import send_message, send_admin_notification
+
+def handle_confirmar_flow(user_id, message):
+    session = session_manager.get_session(user_id)
+    flow_data = session['flow_data']
     
-    def handle_flow(self, user_id, message, session):
-        # Check if trying to access payment flow without confirmation
-        if message == 'mipago' and not session.get('flow_data', {}).get('order_confirmed'):
-            self.whatsapp.send_message(user_id, 
-                "⚠️ No puedes ingresar a esta opción de pagos sin antes confirmar tu pedido. "
-                "Por favor escribe *confirmar* para confirmar tu pedido primero."
-            )
-            return
-        
-        # Start confirmation flow
-        if message == 'confirmar' and not session.get('current_flow'):
-            session['current_flow'] = 'confirmar'
-            session['flow_data'] = {}
-            self.sessions.save_session(user_id, session)
-            self.whatsapp.send_message(user_id,
-                "💄 *Confirmación de Pedido* 💄\n\n"
-                "Por favor ingresa el *ID de tu pedido* (el número que recibiste al hacer tu compra).\n\n"
-                "Escribe *salir* en cualquier momento para cancelar este proceso."
-            )
-            return
-        
-        # Handle confirmation flow steps
-        if session.get('current_flow') == 'confirmar':
-            self._handle_confirmation_flow(user_id, message, session)
-            return
-        
-        # Handle payment flow
-        if message == 'mipago' and session.get('flow_data', {}).get('order_confirmed'):
-            self._handle_payment_flow(user_id, session)
-            return
+    # Step 1: Starting confirmation
+    if 'pedido_id' not in flow_data:
+        if message.lower() == 'salir':
+            session_manager.clear_flow(user_id)
+            return confirmar_exit_template()
+            
+        flow_data['pedido_id'] = message
+        return confirmar_id_received_template(message)
     
-    def _handle_confirmation_flow(self, user_id, message, session):
-        flow_data = session.get('flow_data', {})
+    # Step 2: Confirmation choice
+    if message.lower() == 'si':
+        # Send success messages
+        pedido_id = flow_data['pedido_id']
+        send_admin_notification(admin_confirm_notification(pedido_id))
+        session_manager.clear_flow(user_id)
+        return confirmar_success_template(pedido_id)
         
-        # Exit flow
-        if message == 'salir':
-            self.whatsapp.send_message(user_id,
-                "Has salido del proceso de confirmación de pedido. "
-                "Puedes continuar con otras consultas."
-            )
-            self.sessions.end_flow(user_id)
-            return
+    elif message.lower() == 'no':
+        # Send cancel messages
+        pedido_id = flow_data['pedido_id']
+        send_admin_notification(admin_cancel_notification(pedido_id))
+        session_manager.clear_flow(user_id)
+        return confirmar_cancel_template(pedido_id)
         
-        # Step 1: Get order ID
-        if 'order_id' not in flow_data:
-            flow_data['order_id'] = message
-            session['flow_data'] = flow_data
-            self.sessions.save_session(user_id, session)
-            
-            self.whatsapp.send_message(user_id,
-                f"🔍 ID del pedido recibido: *{message}*\n\n"
-                "Por favor escribe:\n"
-                "- *si* para confirmar este pedido\n"
-                "- *no* para cancelarlo\n"
-                "- *salir* para salir sin cambios"
-            )
-            return
+    elif message.lower() == 'salir':
+        session_manager.clear_flow(user_id)
+        return confirmar_exit_template()
         
-        # Step 2: Confirm or cancel order
-        if message in ['si', 'no']:
-            order_id = flow_data['order_id']
-            
-            if message == 'si':
-                # Confirm order
-                flow_data['order_confirmed'] = True
-                session['flow_data'] = flow_data
-                self.sessions.save_session(user_id, session)
-                
-                # Notify user
-                self.whatsapp.send_message(user_id,
-                    f"✅ ¡Pedido confirmado exitosamente!\n\n"
-                    f"ID del pedido: *{order_id}*\n\n"
-                    "Ahora puedes proceder con el pago escribiendo *mipago*."
-                )
-                
-                # Notify admin
-                self.whatsapp.send_admin_notification(self.admin_number,
-                    f"📦 Nuevo pedido confirmado\n\n"
-                    f"ID: {order_id}\n"
-                    f"Cliente: {user_id}\n"
-                    f"Estado: CONFIRMADO"
-                )
-            else:
-                # Cancel order
-                self.whatsapp.send_message(user_id,
-                    f"❌ Pedido cancelado exitosamente\n\n"
-                    f"ID del pedido: *{order_id}*"
-                )
-                
-                # Notify admin
-                self.whatsapp.send_admin_notification(self.admin_number,
-                    f"📦 Pedido cancelado\n\n"
-                    f"ID: {order_id}\n"
-                    f"Cliente: {user_id}\n"
-                    f"Estado: CANCELADO POR CLIENTE"
-                )
-            
-            self.sessions.end_flow(user_id)
+    else:
+        return "Por favor responda con *si*, *no* o *salir*."
+
+def handle_mipago_flow(user_id):
+    session = session_manager.get_session(user_id)
     
-    def _handle_payment_flow(self, user_id, session):
-        order_id = session['flow_data']['order_id']
+    # Check if user completed confirmar flow
+    if 'pedido_id' not in session['flow_data']:
+        return mipago_not_ready_template()
         
-        self.whatsapp.send_message(user_id,
-            "💳 *Proceso de Pago* 💳\n\n"
-            "Para enviar tu comprobante de pago:\n"
-            "1. Envía un mensaje al número *+584241220797*\n"
-            "2. Adjunta el comprobante de pago\n"
-            "3. Incluye esta información:\n"
-            f"   - ID del pedido: *{order_id}*\n"
-            "   - Tu nombre completo\n\n"
-            "Nuestro equipo validará tu pago y te notificará los próximos pasos.\n\n"
-            "Si deseas cancelar el pago, por favor notifícalo al mismo número."
-        )
-        
-        self.sessions.end_flow(user_id)
+    # Send instructions and exit flow
+    session_manager.clear_flow(user_id)
+    return mipago_instructions_template()

@@ -1,90 +1,81 @@
-from flask import Flask, jsonify, request
-from whatsapp_api import WhatsAppAPI
-from gemini_client import GeminiClient
-from sessions import SessionManager
-from flows import FlowManager
-from templates import (
-    WELCOME_TEMPLATE,
-    GOODBYE_TEMPLATE,
-    NOTIFICATIONS_INFO
-)
-import os
+from flask import Flask, request, jsonify
+from sessions import session_manager
+from flows import handle_confirmar_flow, handle_mipago_flow
+from templates import welcome_template, goodbye_template
+from gemini_client import gemini_client
+from whatsapp import send_message
 import time
 
 app = Flask(__name__)
 
-# Initialize components
-whatsapp = WhatsAppAPI(
-    token=os.getenv('WHATSAPP_TOKEN'),
-    phone_id=os.getenv('WHATSAPP_PHONE_ID')
-)
-gemini = GeminiClient(api_key=os.getenv('GEMINI_API_KEY'))
-sessions = SessionManager()
-flows = FlowManager(whatsapp, sessions)
-
-@app.route("/webhook/", methods=["POST", "GET"])
-def webhook_whatsapp():
+@app.route("/webhook/", methods=["GET", "POST"])
+def webhook():
     # Verify webhook
     if request.method == "GET":
-        if request.args.get('hub.verify_token') == os.getenv('VERIFY_TOKEN'):
+        if request.args.get('hub.verify_token') == "HolaNovato":
             return request.args.get('hub.challenge')
-        return "Authentication failed", 403
+        return "Error de autentificación", 403
     
     # Process incoming message
     data = request.get_json()
     
-    # Skip non-message events
     try:
-        message_data = data['entry'][0]['changes'][0]['value']
-        if 'messages' not in message_data:
+        # Skip non-message events
+        if 'messages' not in data['entry'][0]['changes'][0]['value']:
             return jsonify({"status": "success"}), 200
-    except:
-        return jsonify({"status": "error"}), 400
-    
-    # Extract message info
-    message = message_data['messages'][0]
-    sender = message['from']
-    text = message['text']['body'].lower().strip()
-    timestamp = message['timestamp']
-    
-    # Get or create session
-    session = sessions.get_session(sender)
-    
-    # Check if user is in a flow
-    if session.get('current_flow'):
-        flows.handle_flow(sender, text, session)
+            
+        # Extract message info
+        message_data = data['entry'][0]['changes'][0]['value']['messages'][0]
+        user_id = message_data['from']
+        message = message_data['text']['body']
+        
+        # Get user session
+        session = session_manager.get_session(user_id)
+        session_manager.log_message(user_id, message)
+        
+        # Check if user is in a flow
+        current_flow = session['flow']
+        
+        # Handle flows
+        if message.lower() == 'confirmar':
+            session_manager.update_flow(user_id, 'confirmar')
+            return jsonify({"status": "success"}), 200
+            
+        elif message.lower() == 'mipago':
+            session_manager.update_flow(user_id, 'mipago')
+            return jsonify({"status": "success"}), 200
+            
+        elif current_flow == 'confirmar':
+            response = handle_confirmar_flow(user_id, message)
+            send_message(user_id, response)
+            return jsonify({"status": "success"}), 200
+            
+        elif current_flow == 'mipago':
+            response = handle_mipago_flow(user_id)
+            send_message(user_id, response)
+            return jsonify({"status": "success"}), 200
+            
+        # Handle greetings
+        greetings = ["hola", "hi", "hello", "buenos días", "buenas tardes", "buenas noches"]
+        if any(greeting in message.lower() for greeting in greetings):
+            send_message(user_id, welcome_template())
+            return jsonify({"status": "success"}), 200
+            
+        # Handle goodbyes
+        goodbyes = ["adiós", "chao", "bye", "hasta luego", "nos vemos"]
+        if any(goodbye in message.lower() for goodbye in goodbyes):
+            send_message(user_id, goodbye_template())
+            return jsonify({"status": "success"}), 200
+            
+        # Default: Use AI to respond
+        ai_response = gemini_client.generate_response(message)
+        send_message(user_id, ai_response)
         return jsonify({"status": "success"}), 200
-    
-    # Handle first message
-    if not session.get('initialized'):
-        whatsapp.send_message(sender, WELCOME_TEMPLATE)
-        session['initialized'] = True
-        sessions.save_session(sender, session)
-        return jsonify({"status": "success"}), 200
-    
-    # Handle special commands
-    if text in ['confirmar', 'mipago']:
-        flows.handle_flow(sender, text, session)
-        return jsonify({"status": "success"}), 200
-    
-    # Handle goodbye messages
-    if any(word in text for word in ['adiós', 'chao', 'bye', 'hasta luego', 'nos vemos']):
-        whatsapp.send_message(sender, GOODBYE_TEMPLATE)
-        return jsonify({"status": "success"}), 200
-    
-    # Handle notifications info
-    if any(word in text for word in ['notificaciones', 'estado', 'seguimiento', 'tracking']):
-        whatsapp.send_message(sender, NOTIFICATIONS_INFO)
-        return jsonify({"status": "success"}), 200
-    
-    # Handle with Gemini AI
-    try:
-        response = gemini.generate_response(text, session)
-        whatsapp.send_message(sender, response)
+        
     except Exception as e:
-        whatsapp.send_message(sender, "Disculpas, hubo un error. Por favor contacta al +54 9 3813 02-1066 para asistencia.")
-    
-    return jsonify({"status": "success"}), 200
+        print(f"Error processing message: {e}")
+        send_message(user_id, "Disculpas, hubo un error procesando tu mensaje. Por favor intenta nuevamente.")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', debug=True)
