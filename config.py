@@ -13,4 +13,4 @@ class Config:
     WEBHOOK_VERIFY_TOKEN = "HolaNovato"
     
     # Archivos
-    PROMPT_FILE = "prompts/prompt.txt"
+    PROMPT_FILE = "prompt.txt"
