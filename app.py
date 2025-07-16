@@ -1,106 +1,88 @@
-from flask import Flask, request, jsonify
-from sessions import SessionManager
-from whasatpp import WhatsAppAPI
-from gemini import GeminiAI
-from templates import *
-import time
+from flask import Flask, jsonify, request
+from config import Config
+from services.ai_service import ai_service
+from services.whatsapp_service import whatsapp_service
+import asyncio
+from functools import wraps
 
 app = Flask(__name__)
-sessions = SessionManager()
-whatsapp = WhatsAppAPI()
 
-# Cargar prompt
-with open('prompt.txt', 'r', encoding='utf-8') as f:
-    PROMPT = f.read()
+def async_route(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        return asyncio.run(f(*args, **kwargs))
+    return wrapper
 
-def handle_confirmar_flow(user_id, user_message):
-    session = sessions.get_session(user_id)
-    
-    if user_message == "salir":
-        sessions.clear_flow(user_id)
-        whatsapp.send_message(user_id, SALIR_CONFIRMAR)
-        return True
-    
-    if not session['data'].get('pedido_id'):
-        sessions.set_data(user_id, 'pedido_id', user_message)
-        whatsapp.send_message(user_id, CONFIRMAR_OPCION.format(user_message))
-        return False
-    
-    if user_message == "si":
-        pedido_id = session['data']['pedido_id']
-        whatsapp.send_message(user_id, PEDIDO_CONFIRMADO.format(pedido_id))
-        whatsapp.send_admin_notification(ADMIN_CONFIRMADO.format(pedido_id))
-        sessions.clear_flow(user_id)
-        return True
-    elif user_message == "no":
-        pedido_id = session['data']['pedido_id']
-        whatsapp.send_message(user_id, PEDIDO_CANCELADO.format(pedido_id))
-        whatsapp.send_admin_notification(ADMIN_CANCELADO.format(pedido_id))
-        sessions.clear_flow(user_id)
-        return True
-    
-    return False
-
-def handle_mipago_flow(user_id):
-    pedido_id = sessions.get_data(user_id, 'pedido_id')
-    if pedido_id:
-        whatsapp.send_message(user_id, PEDIR_COMPROBANTE.format(pedido_id))
-        sessions.clear_flow(user_id)
-        return True
-    else:
-        whatsapp.send_message(user_id, ERROR_MIPAGO)
-        return False
-
-@app.route("/webhook/", methods=["GET", "POST"])
-def webhook():
+@app.route("/webhook/", methods=["POST", "GET"])
+@async_route
+async def webhook_whatsapp():
+    # Verificación del token (GET)
     if request.method == "GET":
-        if request.args.get("hub.verify_token") == "HolaNovato":
-            return request.args.get("hub.challenge")
-        return "Error de autenticación", 403
-
-    data = request.get_json()
-    entry = data.get("entry", [{}])[0]
-    changes = entry.get("changes", [{}])[0]
-    value = changes.get("value", {})
+        if request.args.get('hub.verify_token') == Config.VERIFY_TOKEN:
+            return request.args.get('hub.challenge')
+        return "Error de autentificación", 403
     
-    if "messages" not in value:
-        return jsonify({"status": "success"}), 200
-    
-    message = value["messages"][0]
-    user_id = message["from"]
-    user_message = message["text"]["body"].lower().strip()
-    
-    # Manejar flujos primero
-    current_flow = sessions.get_flow(user_id)
-    
-    if current_flow == "confirmar":
-        flow_completed = handle_confirmar_flow(user_id, user_message)
-        if flow_completed:
-            return jsonify({"status": "success"}), 200
-    elif user_message == "mipago":
-        if sessions.get_data(user_id, 'pedido_id'):
-            handle_mipago_flow(user_id)
-            return jsonify({"status": "success"}), 200
-        else:
-            whatsapp.send_message(user_id, ERROR_MIPAGO)
-            return jsonify({"status": "success"}), 200
-    
-    # Si no está en flujo o ya salió
-    if not sessions.get_flow(user_id):
-        if user_message == "confirmar":
-            sessions.set_flow(user_id, "confirmar")
-            whatsapp.send_message(user_id, PEDIR_ID)
-            return jsonify({"status": "success"}), 200
+    # Procesamiento de mensajes (POST)
+    try:
+        data = request.get_json()
         
-        # Conversación normal con IA
-        if not sessions.get_session(user_id).get("has_welcome"):
-            whatsapp.send_message(user_id, BIENVENIDA)
-            sessions.get_session(user_id)["has_welcome"] = True
-        else:
-            response = GeminiAI.generate_response(PROMPT, user_message)
-            whatsapp.send_message(user_id, response)
-    
-    return jsonify({"status": "success"}), 200
+        # Extraer información del mensaje
+        entry = data['entry'][0]
+        changes = entry['changes'][0]
+        value = changes['value']
+        
+        # Verificar si hay mensajes
+        if 'messages' not in value:
+            return jsonify({"status": "success"}), 200
+            
+        message = value['messages'][0]
+        telefono_cliente = message['from']
+        mensaje = message['text']['body'].lower() if 'text' in message else ''
+        
+        # Manejar mensajes especiales
+        if not mensaje:
+            return jsonify({"status": "success"}), 200
+            
+        # Comandos especiales
+        if mensaje == 'confirmar':
+            whatsapp_service.send_message(telefono_cliente, Config.CONFIRMAR_PEDIDO)
+            return jsonify({"status": "success"}), 200
+            
+        if mensaje == 'mipago':
+            whatsapp_service.send_message(telefono_cliente, Config.PEDIR_COMPROBANTE)
+            return jsonify({"status": "success"}), 200
+            
+        if mensaje == 'salir':
+            whatsapp_service.send_message(telefono_cliente, Config.DESPEDIDA)
+            return jsonify({"status": "success"}), 200
+            
+        # Mensaje de bienvenida para saludos iniciales
+        saludos = ["hola", "hi", "hello", "buenos días", "buenas tardes", "buenas noches"]
+        if any(saludo in mensaje for saludo in saludos):
+            whatsapp_service.send_message(telefono_cliente, Config.BIENVENIDA)
+            return jsonify({"status": "success"}), 200
+            
+        # Mensajes de despedida
+        despedidas = ["adiós", "chao", "bye", "hasta luego", "nos vemos"]
+        if any(despedida in mensaje for despedida in despedidas):
+            whatsapp_service.send_message(telefono_cliente, Config.DESPEDIDA)
+            return jsonify({"status": "success"}), 200
+            
+        # Agradecimientos
+        agradecimientos = ["gracias", "muchas gracias", "thanks", "thank you"]
+        if any(agradecimiento in mensaje for agradecimiento in agradecimientos):
+            whatsapp_service.send_message(telefono_cliente, "¡Es un placer ayudarte! 😊 ¿Necesitas algo más?")
+            return jsonify({"status": "success"}), 200
+            
+        # Procesar con IA para otros mensajes
+        respuesta_ia = await ai_service.generate_response(mensaje)
+        whatsapp_service.send_message(telefono_cliente, respuesta_ia)
+        
+        return jsonify({"status": "success"}), 200
+        
+    except Exception as e:
+        print(f"Error en webhook: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True)
